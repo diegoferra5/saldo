@@ -57,3 +57,7 @@ htmlcov/
 # Database
 *.db
 *.sqlite3
+
+# Test files (temporary)
+test_config.py
+test_*.py
