@@ -7,7 +7,7 @@ Week 1: Basic setup and health check
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.routes import auth  
 app = FastAPI(
     title= "Saldo Api",
     description= "API de Gestión Financiera Personal para México",
@@ -25,6 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)  
 
 # Root endpoint - Health check
 @app.get("/")
