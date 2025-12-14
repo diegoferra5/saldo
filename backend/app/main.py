@@ -4,7 +4,7 @@ Saldo API - Main application entry point
 This file initializes the FastAPI application and defines the root endpoint.
 Week 1: Basic setup and health check
 '''
-
+import app.models
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth  
