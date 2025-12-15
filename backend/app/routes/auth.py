@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import create_access_token, get_current_user
 from app.schemas.user import UserCreate, UserLogin, UserResponse
+from app.models.user import User
 from app.services.auth_service import create_user, authenticate_user, get_user_by_email
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -76,10 +77,14 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-def get_current_user_info(current_user: dict = Depends(get_current_user)):
+def get_current_user_info(
+    current_user: User = Depends(get_current_user),
+):
     """
-    Get current user information from token.
-    
+    Get the current user's profile.
+
     Requires valid access token in Authorization header.
+
+    Note: `get_current_user` must return a SQLAlchemy `User` instance.
     """
     return current_user

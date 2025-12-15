@@ -4,10 +4,12 @@ Saldo API - Main application entry point
 This file initializes the FastAPI application and defines the root endpoint.
 Week 1: Basic setup and health check
 '''
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth  
+
+from app.routes import auth
+from app.routes import statements 
+
 app = FastAPI(
     title= "Saldo Api",
     description= "API de Gestión Financiera Personal para México",
@@ -26,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)  
+app.include_router(statements.router)
 
 # Root endpoint - Health check
 @app.get("/")
