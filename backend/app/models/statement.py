@@ -17,6 +17,7 @@ class Statement(Base):
     
     # File info
     bank_name = Column(String(50), nullable=False)
+    account_type = Column(String(20), nullable=False, default="debit", server_default="debit")  # ← NUEVO
     statement_month = Column(Date, nullable=False)
     file_name = Column(String(255), nullable=False)
     file_size_kb = Column(Integer, nullable=True)
@@ -50,16 +51,23 @@ class Statement(Base):
             name="check_parsing_status"
         ),
         
-        # Unique constraint (mismo mes + banco por usuario)
+        # Check constraint para account_type (NUEVO)
+        CheckConstraint(
+            "account_type IN ('debit', 'credit', 'investment')",
+            name="check_account_type"
+        ),
+        
+        # Unique constraint (mismo mes + banco + tipo de cuenta por usuario) - ACTUALIZADO
         UniqueConstraint(
-            "user_id", "bank_name", "statement_month", 
+            "user_id", "bank_name", "account_type", "statement_month", 
             name="unique_user_statement"
         ),
         
         # Índices (nombres coinciden con SQL)
         Index("idx_statements_user_id", "user_id"),
         Index("idx_statements_status", "parsing_status"),
+        Index("idx_statements_account_type", "account_type"),  # ← NUEVO
     )
     
     def __repr__(self):
-        return f"<Statement(id={self.id}, bank={self.bank_name}, month={self.statement_month}, status={self.parsing_status})>"
+        return f"<Statement(id={self.id}, bank={self.bank_name}, type={self.account_type}, month={self.statement_month}, status={self.parsing_status})>"
