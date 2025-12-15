@@ -1,23 +1,23 @@
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 import uuid
 
 from app.core.database import Base
 
-
 class User(Base):
-    """
-    User model representing the users table.
-    """
     __tablename__ = "users"
-
+    
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    hashed_password = Column(String(255), nullable=False)
-    full_name = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
-
+    email = Column(String, unique=True, nullable=False, index=True)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationship to Statements
+    statements = relationship("Statement", back_populates="user", cascade="all, delete-orphan")
+    
     def __repr__(self):
-        return f"<User(email='{self.email}', full_name='{self.full_name}')>"
+        return f"<User(email={self.email})>"
