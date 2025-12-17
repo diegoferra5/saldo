@@ -167,7 +167,7 @@ async def upload(user_id: str):  # User can send ANY user_id
 - **Location**: `/tmp/statements/{user_id}/`
 - **Naming**: `{timestamp}_{sanitized_filename}.pdf`
 - **Lifecycle**: 
-  - Saved on upload
+  - Saved on upload 
   - Deleted after parsing (Week 1 Day 5)
   - Auto-cleaned on Mac reboot or after 3+ days
 
