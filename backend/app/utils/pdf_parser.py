@@ -158,10 +158,42 @@ def parse_transaction_line(line):
     print(f"Parsed successfully: {result}")
     return result
 
+    def extract_statement_summary(pdf_path):
+        summary = []
+
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+
+                if not text: 
+                    continue
+
+                lines = text.split('\n')
+
+                for line in lines:
+                    line_clean = line.strip()
+                    line_lower = line_clean.lower()
+
+                    if "comportamiento" in line_lower:
+                        inside_summary= True
+                        continue
+
+                    if "saldo anterior" in line_lower:
+                        saldo_anterior = line_lower
+                        continue
+                    
+                    if "depósitos / abonos" in line_lower:
+                        n_depositos = line_lower
+
+
+    def transaction_type(transaction, prev_balance):
+        pass
+
 
 if __name__ == "__main__":
     pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
-    
+    pdf_path2023 = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_2023.pdf"
+
     # Extract raw lines
     transaction_lines = extract_transaction_lines(pdf_path)
     
@@ -177,11 +209,17 @@ if __name__ == "__main__":
         if parsed:
             parsed_transactions.append(parsed)
     
+    #shitty
+    print(f"{'='*70}\n")
+    print(parsed_transactions[0])
+
+
     # Summary
     print(f"\n{'='*70}")
     print(f"SUCCESSFULLY PARSED: {len(parsed_transactions)}/{len(transaction_lines)}")
     print(f"{'='*70}\n")
-    
+
+    '''
     # Show first 10 in clean format
     print("\nFirst 10 transactions:")
     for i, trans in enumerate(parsed_transactions[:10], 1):
@@ -200,3 +238,5 @@ if __name__ == "__main__":
     print(f"Empty descriptions: {empty_descriptions}")
     print(f"Complete transactions (with balance): {complete_transactions}")
     print(f"Incomplete transactions (no balance): {incomplete_transactions}")
+    '''
+
