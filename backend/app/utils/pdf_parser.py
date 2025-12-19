@@ -265,26 +265,34 @@ def extract_statement_summary(pdf_path):
 
 
 def determine_transaction_type(transactions, summary):
+    """
+    Classify each transaction as CARGO, ABONO, or UNKNOWN.
+    
+    UNKNOWN transactions require manual user review.
+    """
     # 1. initialize
-    previous_balance= summary["starting_balance"]
+    previous_balance = summary["starting_balance"]
         
-    #keywords
+    # keywords
     ABONO_KEYWORDS = [
-    "SPEI RECIBIDO",
-    "DEPOSITO",
-    "ABONO",
-    "REEMBOLSO",
-    "DEVOLUC",
-    "INTERESES",
+        "SPEI RECIBIDO",
+        "DEPOSITO",
+        "ABONO",
+        "REEMBOLSO",
+        "DEVOLUC",
+        "INTERESES",
+        "BECAS",
+        "BECA"
     ]
 
     CARGO_KEYWORDS = [
-    "SPEI ENVIADO",
-    "RETIRO CAJERO",
-    "RETIRO CAJERO AUTOMATICO",
-    "PAGO TARJETA DE CREDITO",
-    "COMISION",
-    "IVA"
+        "SPEI ENVIADO",
+        "RETIRO CAJERO",
+        "RETIRO CAJERO AUTOMATICO",
+        "PAGO TARJETA DE CREDITO",
+        "COMISION",
+        "IVA",
+        "EFECTIVO SEGURO"
     ]
 
     # 2. classify each transaction
@@ -292,6 +300,9 @@ def determine_transaction_type(transactions, summary):
         current_balance = transaction["saldo_liquidacion"]
         amount_abs = transaction["amount_abs"]
         description = transaction["description"]
+        
+        # Initialize review flag
+        transaction["needs_review"] = False
 
         # case A: Has balance (more reliable)
         if current_balance is not None:
@@ -311,18 +322,59 @@ def determine_transaction_type(transactions, summary):
             
             else:
                 # current balance == previous balance (rare edge case)
-                # default cargo to safety
-                transaction["movement_type"] = "CARGO"
-                transaction["amount"] = -amount_abs
-                print("cargo case a igual")
-        
+                # Try saldo_operacion first, then keywords
+                
+                saldo_op = transaction["saldo_operacion"]
+                
+                if saldo_op is not None and saldo_op != previous_balance:
+                    # Use saldo_operacion to determine type
+                    if saldo_op > previous_balance:
+                        transaction["movement_type"] = "ABONO"
+                        transaction["amount"] = amount_abs
+                        print("abono case a igual (saldo_operacion)")
+                    else:  # saldo_op < previous_balance
+                        transaction["movement_type"] = "CARGO"
+                        transaction["amount"] = -amount_abs
+                        print("cargo case a igual (saldo_operacion)")
+                else:
+                    # Can't use saldo_operacion - fall back to keywords
+                    description_upper = description.upper()
+                    
+                    is_abono = False
+                    for keyword in ABONO_KEYWORDS:
+                        if keyword in description_upper:
+                            is_abono = True
+                            break
+                    
+                    if is_abono:
+                        transaction["movement_type"] = "ABONO"
+                        transaction["amount"] = amount_abs
+                        print("abono case a igual (keywords)")
+                    else:
+                        # Check CARGO keywords
+                        is_cargo = False
+                        for keyword in CARGO_KEYWORDS:
+                            if keyword in description_upper:
+                                is_cargo = True
+                                break
+                        
+                        if is_cargo:
+                            transaction["movement_type"] = "CARGO"
+                            transaction["amount"] = -amount_abs
+                            print("cargo case a igual (keywords)")
+                        else:
+                            # ✅ UNKNOWN - user must decide
+                            transaction["movement_type"] = "UNKNOWN"
+                            transaction["amount"] = None
+                            transaction["needs_review"] = True
+                            print("unknown case a igual (no keywords)")
+
             previous_balance = current_balance
-        
+                    
         # case B: No balance (use keywords)
         else:
-
-            # convert description to uppercase to comparison
-            description_upper= description.upper()
+            # convert description to uppercase for comparison
+            description_upper = description.upper()
 
             # check abono keywords first
             is_abono = False
@@ -332,31 +384,46 @@ def determine_transaction_type(transactions, summary):
                     break
             
             if is_abono:
-                transactions["movement_type"] = "ABONO"
-                transactions["amount"] = amount_abs
+                transaction["movement_type"] = "ABONO"
+                transaction["amount"] = amount_abs
                 print("abono case b")
-
             else:
-                transactions["movement_type"] = "CARGO"
-                transactions["amount"] = -amount_abs
-                print("cargo case b")
+                # Check CARGO keywords
+                is_cargo = False
+                for keyword in CARGO_KEYWORDS:
+                    if keyword in description_upper:
+                        is_cargo = True
+                        break
+                
+                if is_cargo:
+                    transaction["movement_type"] = "CARGO"
+                    transaction["amount"] = -amount_abs
+                    print("cargo case b")
+                else:
+                    # ✅ UNKNOWN - user must decide
+                    transaction["movement_type"] = "UNKNOWN"
+                    transaction["amount"] = None
+                    transaction["needs_review"] = True
+                    print("unknown case b (no keywords)")
 
-    # 3. validation
-
+    # 3. validation (skip UNKNOWN transactions)
+    
     # calculate totals 
     total_abonos = 0
     total_cargos = 0
     count_abonos = 0
     count_cargos = 0
+    count_unknown = 0
 
     for transaction in transactions:
         if transaction["movement_type"] == "ABONO":
             total_abonos += transaction["amount"]
             count_abonos += 1
-
-        else:
+        elif transaction["movement_type"] == "CARGO":
             total_cargos += abs(transaction["amount"])
             count_cargos += 1
+        else:  # UNKNOWN
+            count_unknown += 1
 
     # compare with summary
     expected_abonos = summary["deposits_amount"]
@@ -364,18 +431,36 @@ def determine_transaction_type(transactions, summary):
     expected_count_abonos = summary["n_deposits"]
     expected_count_cargos = summary["n_charges"]
 
-    # validate with amounts
+    # Report classification results
+    print(f"\n{'='*70}")
+    print("CLASSIFICATION SUMMARY")
+    print(f"{'='*70}")
+    print(f"✅ Abonos classified: {count_abonos}")
+    print(f"✅ Cargos classified: {count_cargos}")
+    print(f"⚠️  Unknown (need review): {count_unknown}")
+    print(f"{'='*70}\n")
+
+    # validate amounts (only for classified transactions)
     if abs(total_abonos - expected_abonos) > 0.1:
-        print(f"WARNING: Abonos total mismatch: calculated {total_abonos}, expected {expected_abonos}")
+        print(f"WARNING: Abonos total mismatch: calculated {total_abonos:.2f}, expected {expected_abonos:.2f}")
 
-    if abs(total_cargos - total_cargos) > 0.1:
-        print(f"WARNING: Cargos total mismatch: calculated {total_cargos}, expected {expected_cargos}")
+    if abs(total_cargos - expected_cargos) > 0.1:
+        print(f"WARNING: Cargos total mismatch: calculated {total_cargos:.2f}, expected {expected_cargos:.2f}")
 
-    if count_abonos != expected_count_abonos:
-        print(f"WARNING: Abonos count mismatch: found {count_abonos}, expected {expected_count_abonos}")
-
-    if count_cargos != expected_count_cargos:
-        print(f"WARNING: Cargos count mismatch: found {count_cargos}, expected {expected_count_cargos}")
+    # Note: counts won't match if there are UNKNOWN transactions
+    missing_abonos = expected_count_abonos - count_abonos
+    missing_cargos = expected_count_cargos - count_cargos
+    
+    if missing_abonos > 0:
+        print(f"INFO: {missing_abonos} abonos pending classification (likely in UNKNOWN)")
+    
+    if missing_cargos > 0:
+        print(f"INFO: {missing_cargos} cargos pending classification (likely in UNKNOWN)")
+    
+    # Check if UNKNOWN count matches expected missing
+    expected_unknown = missing_abonos + missing_cargos
+    if count_unknown != expected_unknown:
+        print(f"WARNING: Unknown count ({count_unknown}) doesn't match expected missing ({expected_unknown})")
 
     return transactions
 
@@ -434,4 +519,6 @@ if __name__ == "__main__":
     print(f"Incomplete transactions (no balance): {incomplete_transactions}")
     '''
 
-    
+    summary = extract_statement_summary(pdf_path)
+    determine_transaction_type(parsed_transactions, summary)
+
