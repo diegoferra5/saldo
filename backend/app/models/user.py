@@ -53,6 +53,12 @@ class User(Base):
         back_populates="user",
         passive_deletes=True
     )
+
+    transactions = relationship(
+        "Transaction", 
+        back_populates="user", 
+        passive_deletes=True)
+
     
     def __repr__(self) -> str:
         return f"<User(email={self.email})>"

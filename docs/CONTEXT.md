@@ -1,387 +1,424 @@
-# Saldo – Backend Context (FastAPI)
-
-**Project**: Saldo (Personal finance management for Mexico)  
-**Stack**: FastAPI + SQLAlchemy + PostgreSQL (Supabase) + JWT  
-**Last updated**: 2025-12-14 (Week 1, Day 2 Complete)  
-**Owner**: Diego (Data Engineer/Scientist → Full-Stack)
+# Saldo - Estado del Proyecto
+**Fecha:** 20 de Diciembre, 2025  
+**Fase:** Week 1, Day 4 - FASE 2 Completada ✅  
+**Siguiente:** FASE 3 - Pydantic Schemas
 
 ---
 
-## 1) What this backend does (current scope)
+## 🎯 Resumen Ejecutivo
 
-✅ **Auth system**: register, login, get current user (JWT-based)  
-✅ **Statement upload**: Users can upload bank statement PDFs  
-✅ **Statement CRUD**: Create, Read, List, Delete statements  
-⏭️ **Next**: PDF parsing (extract transactions from BBVA statements)
+**Saldo** es una aplicación de finanzas personales para el mercado mexicano que permite a usuarios:
+- Subir estados de cuenta bancarios en PDF (BBVA, Banorte, Santander)
+- Parsear y categorizar transacciones automáticamente
+- Hacer seguimiento de presupuestos
+- Recibir asesoría financiera vía AI (GPT-4)
 
----
-
-## 2) Architecture (Layered)
-
-```
-app/
-├── main.py                 # FastAPI app + router registration
-├── routes/                 # HTTP endpoints (controllers)
-│   ├── auth.py            # ✅ Auth endpoints (register, login, /me)
-│   └── statements.py      # ✅ Statement endpoints (upload, list, get, delete)
-├── services/              # Business logic
-│   ├── auth_service.py    # ✅ User creation, authentication
-│   └── statement_service.py # ✅ File handling, DB operations
-├── models/                # SQLAlchemy ORM
-│   ├── user.py           # ✅ User model with relationship to statements
-│   └── statement.py      # ✅ Statement model (bank, account_type, month)
-├── schemas/               # Pydantic validation
-│   ├── user.py           # ✅ UserCreate, UserLogin, UserResponse
-│   └── statement.py      # ✅ StatementUpload, StatementResponse, StatementList
-├── core/                  # Configuration
-│   ├── config.py         # ✅ Settings (DB, JWT secret)
-│   ├── database.py       # ✅ SQLAlchemy engine + session
-│   └── security.py       # ✅ JWT + password hashing + get_current_user
-└── utils/                 # (Future: PDF parsers)
-```
-
-**Request flow:**
-```
-Client → routes/ → services/ → models/ → DB
-DB → models/ → services/ → schemas/ → HTTP JSON
-```
+**MVP Approach:** Manual upload de PDFs (sin APIs bancarias por limitaciones de Belvo en México)
 
 ---
 
-## 3) Environment & Settings
+## 🏆 Logros - HackMTY 2025
 
-**File**: `backend/.env`
-```bash
-DATABASE_URL=postgresql://postgres:[PASSWORD]@[HOST]:5432/postgres
-SECRET_KEY=[generated-with-secrets-module]
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=10080  # 7 days
-```
-
-**File**: `app/core/config.py`
-- Loads via Pydantic `BaseSettings`
-- Validates required env vars
+- ✅ **Ganador:** HackMTY 2025 (hackathon más grande de Latinoamérica)
+- ✅ **Validación:** Jueces vieron valor en el producto
+- ✅ **Objetivo:** Beta pública con 50+ usuarios para Febrero 2026
 
 ---
 
-## 4) Database (Supabase PostgreSQL)
+## 📊 Arquitectura Actual
 
-### **Tables Created:**
+### **Tech Stack**
 
-#### `public.users` ✅
-```sql
-- id (UUID, primary key)
-- email (VARCHAR, unique, indexed)
-- hashed_password (VARCHAR)
-- full_name (VARCHAR, nullable)
-- created_at (TIMESTAMPTZ)
-- updated_at (TIMESTAMPTZ, auto-update trigger)
-```
+**Backend:**
+- FastAPI (Python 3.11.14)
+- PostgreSQL (Supabase)
+- SQLAlchemy ORM
+- Autenticación JWT (bcrypt)
 
-**RLS Policies:**
-- SELECT: Users can view their own profile
-- UPDATE/INSERT/DELETE: Blocked from client (backend handles via service role)
+**Parsing:**
+- pdfplumber (extracción de PDFs)
+- Parser custom BBVA (85% accuracy en statements modernos)
+
+**Frontend (Planeado - Week 2):**
+- Next.js + React
+- Tailwind CSS
+
+**Deployment (Planeado - Week 4):**
+- Railway (backend)
+- Vercel (frontend)
+- Supabase (database)
 
 ---
 
-#### `public.statements` ✅
-```sql
-- id (UUID, primary key)
-- user_id (UUID, FK to users.id, ON DELETE CASCADE)
-- bank_name (VARCHAR(50)) -- BBVA, Santander, etc.
-- account_type (VARCHAR(20)) -- debit, credit, investment
-- statement_month (DATE) -- Normalized to first day of month
-- file_name (VARCHAR(255)) -- Actual filename on disk (timestamped)
-- file_size_kb (INTEGER)
-- parsing_status (VARCHAR(20)) -- pending, processing, success, failed
-- error_message (TEXT, nullable)
-- file_hash (VARCHAR(64)) -- SHA-256 for duplicate detection
-- ip_address (VARCHAR(45), nullable) -- Audit trail
-- created_at (TIMESTAMPTZ)
-- updated_at (TIMESTAMPTZ, auto-update trigger)
-- processed_at (TIMESTAMPTZ, nullable)
+## 🗄️ Base de Datos - Schema Completo
+
+### **Tablas (4 principales)**
+```
+users
+├── id (UUID, PK)
+├── email (VARCHAR, UNIQUE)
+├── hashed_password (VARCHAR)
+├── full_name (VARCHAR, nullable)
+├── created_at (TIMESTAMP)
+└── updated_at (TIMESTAMP)
+
+accounts
+├── id (UUID, PK)
+├── user_id (UUID, FK → users.id ON DELETE CASCADE)
+├── bank_name (VARCHAR(50))
+├── account_type (VARCHAR(10)) -- 'DEBIT' | 'CREDIT'
+├── display_name (VARCHAR(100), nullable)
+├── is_active (BOOLEAN, default true)
+├── created_at (TIMESTAMP)
+└── updated_at (TIMESTAMP)
+
+statements
+├── id (UUID, PK)
+├── user_id (UUID, FK → users.id ON DELETE CASCADE)
+├── account_id (UUID, FK → accounts.id ON DELETE SET NULL, nullable)
+├── bank_name (VARCHAR(50))
+├── account_type (VARCHAR(20))
+├── statement_month (DATE)
+├── period_start (DATE, nullable)
+├── period_end (DATE, nullable)
+├── file_name (VARCHAR(255))
+├── file_size_kb (INTEGER, nullable)
+├── parsing_status (VARCHAR(20)) -- 'pending' | 'processing' | 'success' | 'failed'
+├── error_message (TEXT, nullable)
+├── file_hash (VARCHAR(64), nullable)
+├── ip_address (VARCHAR(45), nullable)
+├── created_at (TIMESTAMP)
+├── updated_at (TIMESTAMP)
+└── processed_at (TIMESTAMP, nullable)
+
+transactions
+├── id (UUID, PK)
+├── user_id (UUID, FK → users.id ON DELETE CASCADE)
+├── account_id (UUID, FK → accounts.id ON DELETE CASCADE)
+├── statement_id (UUID, FK → statements.id ON DELETE CASCADE)
+├── date (VARCHAR(10)) -- "11/NOV" (formato original PDF)
+├── date_liquidacion (VARCHAR(10), nullable)
+├── transaction_date (DATE) -- 2025-11-11 (parseado)
+├── description (TEXT)
+├── amount_abs (NUMERIC(12,2)) -- Siempre positivo
+├── amount (NUMERIC(12,2), nullable) -- Con signo: neg=gasto, pos=ingreso, null=unknown
+├── movement_type (VARCHAR(10)) -- 'CARGO' | 'ABONO' | 'UNKNOWN'
+├── needs_review (BOOLEAN, default true)
+├── category (VARCHAR(50), nullable)
+├── saldo_operacion (NUMERIC(12,2), nullable)
+├── saldo_liquidacion (NUMERIC(12,2), nullable)
+├── transaction_hash (VARCHAR(64)) -- SHA256 para deduplicación
+├── created_at (TIMESTAMP)
+└── updated_at (TIMESTAMP)
 ```
 
-**Constraints:**
+### **Constraints Importantes**
+
+**accounts:**
+- CHECK: `account_type IN ('DEBIT', 'CREDIT')`
+- INDEX: `user_id`, `(user_id, is_active)`
+
+**statements:**
 - CHECK: `parsing_status IN ('pending', 'processing', 'success', 'failed')`
 - CHECK: `account_type IN ('debit', 'credit', 'investment')`
-- UNIQUE: `(user_id, bank_name, account_type, statement_month)` -- Prevents duplicate uploads
+- CHECK: `(period_start IS NULL) OR (period_end IS NULL) OR (period_start <= period_end)`
+- UNIQUE (parcial): `(account_id, statement_month) WHERE account_id IS NOT NULL`
 
-**Indexes:**
-- `idx_statements_user_id` on `user_id`
-- `idx_statements_status` on `parsing_status`
-- `idx_statements_account_type` on `account_type`
-
-**RLS Policies:**
-- SELECT/INSERT/UPDATE/DELETE: Users can only access their own statements (`auth.uid() = user_id`)
-
----
-
-## 5) Auth Design (JWT)
-
-### **Endpoints:**
-- ✅ `POST /api/auth/register` -- Create new user
-- ✅ `POST /api/auth/login` -- Get JWT token
-- ✅ `GET /api/auth/me` -- Get current user (protected)
-
-### **JWT Claims:**
-```json
-{
-  "sub": "user_id_uuid_string",
-  "exp": 1734567890
-}
-```
-
-### **Security Module** (`app/core/security.py`)
-
-**Key Functions:**
-- `get_password_hash()` -- bcrypt hashing
-- `verify_password()` -- bcrypt verification
-- `create_access_token()` -- JWT encoding
-- `decode_access_token()` -- JWT decoding
-- `get_current_user()` -- **Returns SQLAlchemy `User` object** (not dict)
-
-**Critical Pattern:**
-```python
-# ✅ CORRECT
-@router.post("/api/statements/upload")
-async def upload(current_user: User = Depends(get_current_user)):
-    statement = create_statement(user_id=current_user.id)  # From JWT
-    
-# ❌ WRONG
-async def upload(user_id: str):  # User can send ANY user_id
-    statement = create_statement(user_id=user_id)  # INSECURE
-```
+**transactions:**
+- CHECK: `movement_type IN ('CARGO', 'ABONO', 'UNKNOWN')`
+- CHECK: `amount_abs >= 0`
+- UNIQUE: `transaction_hash` con constraint parcial
+- INDEX: `user_id`, `account_id`, `statement_id`, `transaction_date`
+- INDEX GIN: `description` (búsqueda texto)
 
 ---
 
-## 6) Statement Management System
+## 🏗️ Modelos ORM - SQLAlchemy (COMPLETOS ✅)
 
-### **Endpoints:**
-- ✅ `POST /api/statements/upload` -- Upload PDF statement (multipart/form-data)
-- ✅ `GET /api/statements/` -- List user's statements (with filters)
-- ✅ `GET /api/statements/{statement_id}` -- Get specific statement
-- ✅ `DELETE /api/statements/{statement_id}` -- Delete statement + file
+### **Filosofía de Diseño**
 
-### **File Storage:**
-- **Location**: `/tmp/statements/{user_id}/`
-- **Naming**: `{timestamp}_{sanitized_filename}.pdf`
-- **Lifecycle**: 
-  - Saved on upload 
-  - Deleted after parsing (Week 1 Day 5)
-  - Auto-cleaned on Mac reboot or after 3+ days
-
-### **Upload Flow:**
-```python
-1. Validate file type (PDF only)
-2. Validate file size (max 10MB for MVP)
-3. Sanitize filename (remove path traversal chars)
-4. Save to /tmp/statements/{user_id}/
-5. Calculate SHA-256 hash (duplicate detection)
-6. Create DB record (with security checks)
-7. Return statement metadata
-```
-
-### **Security Features:**
-- ✅ JWT authentication required on all endpoints
-- ✅ Ownership validation (can't access others' statements)
-- ✅ Filename sanitization (prevent path traversal)
-- ✅ Duplicate prevention (unique constraint)
-- ✅ Race condition handling (IntegrityError catch)
-- ✅ Orphan file cleanup on DB failure
-
-### **Supported Banks (MVP):**
-- BBVA, Santander, Banorte, Banamex, HSBC, Scotiabank
-
-### **Account Types:**
-- `debit` -- Checking/savings accounts
-- `credit` -- Credit cards
-- `investment` -- Investment accounts
-
----
-
-## 7) Models & Schemas
+**Principios aplicados:**
+1. **DB como Source of Truth:** Supabase maneja constraints e índices
+2. **ORM como Mapper:** Modelos solo mapean a schema existente
+3. **Validaciones en Pydantic:** Reglas de negocio en schemas, no en ORM
+4. **Soft Delete:** Accounts nunca se borran, solo `is_active = False`
+5. **Passive Deletes:** DB maneja cascades vía FK constraints
 
 ### **User Model** (`app/models/user.py`)
 ```python
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    email = Column(String, unique=True, nullable=False, index=True)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String, nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    
-    # Relationship
-    statements = relationship("Statement", back_populates="user", cascade="all, delete-orphan")
+- Columnas: id, email, hashed_password, full_name, created_at, updated_at
+- Relationships: accounts, statements, transactions
+- Approach: Data mapping (sin __table_args__)
+- Cascade: passive_deletes en todos los relationships
+```
+
+### **Account Model** (`app/models/account.py`)
+```python
+- Columnas: id, user_id, bank_name, account_type, display_name, is_active, timestamps
+- Relationships: user, statements, transactions
+- Approach: Data mapping (sin __table_args__)
+- Soft Delete: NUNCA session.delete(), siempre is_active = False
+- Note: updated_at usa onupdate=func.now() (migrar a trigger DB en producción)
 ```
 
 ### **Statement Model** (`app/models/statement.py`)
 ```python
-class Statement(Base):
-    __tablename__ = "statements"
-    
-    # Core fields
-    id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    bank_name = Column(String(50), nullable=False)
-    account_type = Column(String(20), nullable=False, default="debit")
-    statement_month = Column(Date, nullable=False)
-    file_name = Column(String(255), nullable=False)
-    file_size_kb = Column(Integer, nullable=True)
-    
-    # Processing
-    parsing_status = Column(String(20), nullable=False, default="pending")
-    error_message = Column(Text, nullable=True)
-    
-    # Security/Audit
-    file_hash = Column(String(64), nullable=True)
-    ip_address = Column(String(45), nullable=True)
-    
-    # Timestamps
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    processed_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    
-    # Relationship
-    user = relationship("User", back_populates="statements")
-    
-    # Constraints
-    __table_args__ = (
-        CheckConstraint("parsing_status IN ('pending', 'processing', 'success', 'failed')"),
-        CheckConstraint("account_type IN ('debit', 'credit', 'investment')"),
-        UniqueConstraint("user_id", "bank_name", "account_type", "statement_month"),
-        Index("idx_statements_user_id", "user_id"),
-        Index("idx_statements_status", "parsing_status"),
-        Index("idx_statements_account_type", "account_type"),
-    )
+- Columnas: 16 campos incluyendo IDs, file info, processing status, dates
+- Relationships: user, account, transactions
+- Approach: Data mapping (sin __table_args__)
+- Parsing Status: pending → processing → success/failed
+```
+
+### **Transaction Model** (`app/models/transaction.py`)
+```python
+- Columnas: 18 campos incluyendo 3 formatos de fecha, montos, clasificación
+- Relationships: user, account, statement
+- Approach: Data mapping (sin __table_args__)
+- Classification: CARGO (gasto) | ABONO (ingreso) | UNKNOWN (revisar)
+- Deduplicación: transaction_hash (SHA256)
 ```
 
 ---
 
-## 8) What Was Fixed Today
+## 🔧 Componentes Completados
 
-### **A) Import Errors**
-- ❌ `HTTPAuthCredentials` doesn't exist
-- ✅ Fixed: `HTTPAuthorizationCredentials`
+### **✅ FASE 1 - Database Setup (Completada)**
+- [x] Schema en Supabase
+- [x] Tablas: users, accounts, statements, transactions
+- [x] Foreign Keys con políticas CASCADE/SET NULL
+- [x] Constraints e índices
+- [x] Row Level Security policies
 
-### **B) Type Inconsistencies**
-- ❌ `statement_month: datetime` (model uses `date`)
-- ✅ Fixed: Changed to `date` everywhere
+### **✅ FASE 2 - Models & ORM (Completada)**
+- [x] SQLAlchemy Base setup
+- [x] User model
+- [x] Account model  
+- [x] Statement model
+- [x] Transaction model
+- [x] Relationships bidireccionales
+- [x] Arquitectura consistente (DB source of truth)
 
-### **C) Security Improvements**
-- ✅ Added filename sanitization (prevent `../../etc/passwd.pdf`)
-- ✅ Added race condition handling (IntegrityError catch)
-- ✅ Added orphan file cleanup (delete file if DB insert fails)
-- ✅ Store actual filename in DB (not original, but safe timestamped version)
-
-### **D) Schema Confusion**
-- ❌ `json_schema_extra` showing fake example data in list endpoint
-- ✅ Fixed: Removed examples from `StatementList` schema
-- Result: Swagger now shows real data from DB
-
-### **E) Model Constraints**
-- ✅ Added all SQL constraints to SQLAlchemy model (CheckConstraint, UniqueConstraint, Indexes)
-- ✅ Ensures consistency between SQL and ORM
-
----
-
-## 9) Testing Status
-
-### **✅ Completed Tests:**
-- Auth: register, login, /me
-- Statement upload (success)
-- Statement list (with real data)
-- Statement get by ID
-- Duplicate prevention (DB rejects, orphan file cleanup works)
-
-### **⏭️ Pending Tests:**
-- Delete statement + verify file removal
-- Multiple account types (same month/bank)
-- Filters (bank_name, account_type)
-- Invalid inputs (wrong bank, non-PDF, file too large)
-- Security (unauthorized access, cross-user access)
+### **⏳ FASE 3 - Pydantic Schemas (Siguiente)**
+- [ ] User schemas (registro, login, response)
+- [ ] Account schemas (create, update, response)
+- [ ] Statement schemas (upload, response, list)
+- [ ] Transaction schemas (response, update, list)
 
 ---
 
-## 10) Known Limitations (MVP)
+## 🧠 Decisiones de Diseño Importantes
 
-### **Minor Issues (Acceptable for MVP):**
-- ⚠️ Files saved before DB check (slight performance impact)
-- ⚠️ Files in `/tmp` persist until reboot or manual cleanup
-- ⚠️ No automatic PDF deletion after upload (will add in Day 5 after parsing)
+### **1. Manual Upload vs API Automática**
 
-### **Future Improvements (Week 2+):**
-- Cloud storage (S3/GCS) instead of `/tmp`
-- Cronjob to cleanup old processed files
-- Support more banks (Nu, Inbursa)
-- CSV format support
-- Automatic parsing on upload (background job)
+**Decisión:** Manual upload de PDFs  
+**Razón:** Belvo (agregador bancario) solo soporta Brasil, no México  
+**Beneficio:** Más control, validación de concepto, path a API después
+
+### **2. Soft Delete en Accounts**
+
+**Decisión:** Nunca borrar accounts, solo `is_active = False`  
+**Razón:** 
+- Preserva histórico financiero
+- Auditoría y compliance (CONDUSEF)
+- Usuario puede reactivar si fue error
+
+### **3. DB Source of Truth (No ORM Constraints)**
+
+**Decisión:** No duplicar constraints/índices en ORM  
+**Razón:**
+- Supabase ya tiene todo configurado
+- Evita inconsistencias ORM ↔ DB
+- Validaciones irán en Pydantic (mejor lugar)
+- Más simple y mantenible
+
+### **4. Passive Deletes en Todos los Relationships**
+
+**Decisión:** `passive_deletes=True` en todos los relationships  
+**Razón:**
+- DB tiene ON DELETE CASCADE/SET NULL bien configurados
+- Dejamos que PostgreSQL maneje eficientemente
+- Evita N+1 queries de SQLAlchemy
+- Consistencia: DB ejecuta, ORM no interviene
+
+### **5. Three-Way Foreign Keys en Transactions**
+
+**Decisión:** Transaction tiene FK a user, account Y statement  
+**Razón:**
+- Denormalización intencional para queries rápidas
+- Permite: "Dame todas las transacciones del usuario" sin JOIN a statement
+- Facilita analytics y reportes
+- Trade-off: Redundancia aceptable por performance
+
+### **6. Movement Type: CARGO/ABONO/UNKNOWN**
+
+**Decisión:** Clasificación conservadora con categoría UNKNOWN  
+**Razón:**
+- Mejor marcar UNKNOWN que clasificar incorrectamente
+- Usuario revisa manualmente transacciones ambiguas
+- Parser logra 85% accuracy en statements modernos
+- Path a ML personalizado después
 
 ---
 
-## 11) Week 1 Progress
-
-**Timeline:**
-- ✅ Day 1: Backend foundation (Auth, DB, User model)
-- ✅ Day 2: Statement upload system (COMPLETE)
-- ⏭️ Day 3-4: PDF parser (extract transactions from BBVA PDFs)
-- ⏭️ Day 5-6: Transaction model + endpoints
-
-**On track for Week 1 goals!** 🚀
-
----
-
-## 12) Next Steps (Day 3)
-
-**PDF Parser for BBVA:**
-1. Create `app/utils/pdf_parser.py`
-2. Use `pdfplumber` library to extract table data
-3. Parse BBVA debit statement format:
-   - Extract: date, description, amount, balance
-   - Handle different PDF layouts
-4. Create `Transaction` model
-5. Store parsed transactions in DB
-6. Update statement `parsing_status` to "success"
-7. Delete PDF file after successful parsing
-
-**Estimated:** 6-8 hours (can split across 2 days)
-
----
-
-## 13) How to Continue in Next Session
-
-**Context to provide:**
-> "Continue with Saldo backend. Week 1 Day 2 complete: Statement upload system working (PDF upload, CRUD endpoints, file storage, security). Next: implement PDF parser for BBVA debit statements (Day 3). Current stack: FastAPI + SQLAlchemy + Supabase + JWT. Need to extract transactions from uploaded PDFs using pdfplumber."
-
-**Key files to reference:**
-- `app/models/statement.py` (Statement model)
-- `app/services/statement_service.py` (File handling)
-- `app/routes/statements.py` (Upload endpoint)
-- Database: `statements` table with `parsing_status` field
-
-**Dependencies already installed:**
-- pdfplumber (for PDF parsing)
-- All FastAPI/SQLAlchemy dependencies
+## 📁 Estructura del Proyecto
+```
+saldo/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI app (pendiente)
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── database.py            # ✅ SQLAlchemy setup
+│   │   ├── config.py              # ✅ Settings (Supabase URL, JWT secret)
+│   │   └── security.py            # ✅ Password hashing, JWT
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── user.py                # ✅ User ORM model
+│   │   ├── account.py             # ✅ Account ORM model
+│   │   ├── statement.py           # ✅ Statement ORM model
+│   │   └── transaction.py         # ✅ Transaction ORM model
+│   ├── schemas/                   # ⏳ Pydantic (siguiente)
+│   │   ├── __init__.py
+│   │   ├── user.py
+│   │   ├── account.py
+│   │   ├── statement.py
+│   │   └── transaction.py
+│   ├── api/                       # ⏳ FastAPI routes (Week 1-2)
+│   │   ├── __init__.py
+│   │   ├── deps.py                # Dependencies (get_db, get_current_user)
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       ├── auth.py            # Login, register
+│   │       ├── accounts.py        # CRUD accounts
+│   │       ├── statements.py      # Upload, parse
+│   │       └── transactions.py    # List, update, categorize
+│   ├── services/                  # ⏳ Business logic (Week 2-3)
+│   │   ├── __init__.py
+│   │   ├── parser_service.py     # PDF parsing integration
+│   │   └── categorization.py     # Auto-categorization
+│   └── parsers/
+│       ├── __init__.py
+│       └── bbva_parser.py         # ✅ BBVA PDF parser (85% accuracy)
+├── tests/                         # ⏳ Testing (Week 4)
+├── .env                           # Environment variables
+├── requirements.txt               # Dependencies
+└── README.md
 ```
 
 ---
 
-## 📊 Summary of Day 2
+## 🔄 Parser BBVA - Status
 
-**What We Built:**
-- ✅ Complete statement upload system
-- ✅ 4 API endpoints (upload, list, get, delete)
-- ✅ File storage with security (sanitization, hashing, ownership)
-- ✅ Database schema with RLS and constraints
-- ✅ Multi-account support (debit/credit/investment)
-- ✅ Duplicate prevention
-- ✅ Comprehensive testing in Swagger
+**Archivo:** `parsers/bbva_parser.py`  
+**Accuracy:** 85% en statements modernos (Nov 2025)
 
-**Lines of Code:** ~600+ lines across 6 files
+**Funciones principales:**
+1. `extract_statement_summary()` - Extrae totales del bloque "Comportamiento"
+2. `extract_transaction_lines()` - Obtiene líneas de transacciones del PDF
+3. `parse_transaction_line()` - Parsea cada línea en estructura
+4. `determine_transaction_type()` - Clasifica CARGO/ABONO/UNKNOWN
 
-**Time Invested:** ~4-5 hours (on track with roadmap estimate)
+**Output por transacción:**
+```python
+{
+    'date': '11/NOV',
+    'date_liquidacion': '11/NOV',
+    'description': 'STARBUCKS COFFEE',
+    'amount_abs': 150.00,
+    'movement_type': 'CARGO',
+    'amount': -150.00,
+    'needs_review': False,
+    'saldo_operacion': 10948.46,
+    'saldo_liquidacion': 10948.46
+}
+```
 
-**Ready for:** PDF parsing (Week 1 Day 3) 🚀
+**Features futuras:**
+- [ ] Extracción de beneficiario (líneas de detalle)
+- [ ] Parser Santander y Banorte
+- [ ] ML personalizado por usuario
+- [ ] Detección de transacciones recurrentes
+
+---
+
+## 🎯 Roadmap - 8 Semanas
+
+### **Week 1 (Actual)** ✅ ~75% Completa
+- [x] Database setup
+- [x] Models ORM
+- [ ] **→ Pydantic schemas** (siguiente)
+- [ ] Auth endpoints (register/login)
+- [ ] Statement upload endpoint básico
+
+### **Week 2** (Dec 15-21)
+- [ ] Frontend MVP (Next.js)
+- [ ] Upload UI (drag & drop)
+- [ ] Transaction list view
+- [ ] Budget creation
+
+### **Week 3** (Dec 22-28)
+- [ ] Categorización automática
+- [ ] Budget tracking dashboard
+- [ ] OpenAI GPT-4 integration
+- [ ] CSV parser genérico
+
+### **Week 4** (Dec 29-Jan 4)
+- [ ] Testing & bug fixes
+- [ ] Security review
+- [ ] Performance optimization
+- [ ] Deploy a staging
+
+### **Weeks 5-8**
+- Beta testing → Public beta → Production launch
+- Target: 50+ usuarios activos para Feb 9, 2026
+
+---
+
+## 📊 Métricas de Éxito (Feb 2026)
+
+**Producto:**
+- 50+ usuarios activos
+- 70%+ retention (usuarios regresan)
+- 4.0+ rating
+- <3 seg page load
+
+**Técnico:**
+- 0 data breaches
+- 99.5% uptime
+- Response times <500ms p95
+
+**Usuario:**
+- 80%+ recomendarían a un amigo
+- "Me ahorró dinero" mencionado 5+ veces
+
+---
+
+## 🔑 Próximo Paso Inmediato
+
+**FASE 3: Pydantic Schemas**
+
+**Objetivo:** Definir validación de requests/responses para API
+
+**Schemas necesarios:**
+1. **User:** UserCreate, UserLogin, UserResponse, Token
+2. **Account:** AccountCreate, AccountUpdate, AccountResponse
+3. **Statement:** StatementUpload, StatementResponse, StatementList
+4. **Transaction:** TransactionResponse, TransactionUpdate, TransactionList
+
+**Estimado:** 3-4 horas
+
+---
+
+## 💡 Aprendizajes Clave
+
+1. **Web-first > Mobile-first para MVP:** Iteración más rápida
+2. **Constraints no se duplican:** DB tiene verdad, ORM mapea
+3. **Soft delete en fintech:** NUNCA borrar data financiera
+4. **Parser conservador:** Mejor UNKNOWN que clasificación incorrecta
+5. **Arquitectura simple:** Menos capas = menos bugs en MVP
+
+---
+
+**Última actualización:** 20 Dic 2025, 18:30 CST  
+**Siguiente sesión:** Pydantic Schemas  
+**Status general:** ✅ On track para beta Feb 2026
