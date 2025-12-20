@@ -159,9 +159,316 @@ def parse_transaction_line(line):
     return result
 
 
+def extract_statement_summary(pdf_path):
+    """
+    Extracts the financial summary from a BBVA bank statement.
+    
+    Returns:
+        dict: Summary with starting_balance, deposits_amount, charges_amount, etc.
+    
+    Raises:
+        FileNotFoundError: If the PDF doesn't exist
+        ValueError: If information is missing or mathematical validation fails
+        Exception: Other parsing errors
+    """
+    summary = {}
+    inside_summary = False
+    
+    # LEVEL 1: Main try-except for PDF errors
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+
+                if not text: 
+                    continue
+
+                lines = text.split('\n')
+                for line in lines:
+                    line_clean = line.strip()
+                    line_lower = line_clean.lower()
+
+                    if "comportamiento" in line_lower:
+                        inside_summary = True
+                        continue
+
+                    if inside_summary and "saldo promedio mínimo mensual" in line_lower:
+                        inside_summary = False
+                        continue
+                             
+                    if not inside_summary:
+                        continue
+
+                    if "saldo anterior" in line_lower:
+                        prev_balance = line_lower
+                        tokens = prev_balance.split() 
+                        prev_balance = float(tokens[5].strip().replace(",", ""))
+                        summary["starting_balance"] = prev_balance
+                        continue
+                        
+                    if "depósitos / abonos" in line_lower:
+                        deposits = line_lower
+                        tokens = deposits.split()
+                        n_deposits = int(tokens[8].strip())
+                        deposits_amount = float(tokens[9].strip().replace(",",""))
+                        summary["n_deposits"] = n_deposits
+                        summary["deposits_amount"] = deposits_amount
+                        continue
+                        
+                    if "retiros / cargos" in line_lower:
+                        charges = line_lower
+                        tokens = charges.split()
+                        n_charges = int(tokens[9].strip())
+                        charges_amount = float(tokens[10].strip().replace(",",""))
+                        summary["n_charges"] = n_charges
+                        summary["charges_amount"] = charges_amount
+                        continue
+
+                    if "saldo final" in line_lower:
+                        final_balance = line_lower
+                        tokens = final_balance.split() 
+                        final_balance = float(tokens[6].strip().replace(",", ""))
+                        summary["final_balance"] = final_balance
+                        continue
+    
+    except FileNotFoundError:
+        raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+    except Exception as e:
+        raise Exception(f"Error reading PDF: {str(e)}")
+    
+    # LEVEL 2: Validate that summary has all required keys
+    required_keys = ["starting_balance", "deposits_amount", "charges_amount", "final_balance"]
+    missing_keys = [key for key in required_keys if key not in summary]
+    
+    if missing_keys:
+        raise ValueError(
+            f"Incomplete summary extracted. Missing fields: {', '.join(missing_keys)}. "
+            f"The PDF may not have the 'Comportamiento' section or it's formatted differently."
+        )
+    
+    # LEVEL 3: Mathematical validation
+    try:
+        calculated_final = summary["starting_balance"] + summary["deposits_amount"] - summary["charges_amount"]
+        actual_final = summary["final_balance"]
+        
+        if round(calculated_final, 2) != round(actual_final, 2):
+            raise ValueError(
+                f"Summary validation failed! "
+                f"Calculated final balance: {calculated_final:.2f}, "
+                f"but PDF shows: {actual_final:.2f}. "
+                f"Difference: {abs(calculated_final - actual_final):.2f}"
+            )
+    except KeyError as e:
+        raise ValueError(f"Missing required field in summary: {str(e)}")
+    
+    return summary
+
+
+def determine_transaction_type(transactions, summary):
+    """
+    Classify each transaction as CARGO, ABONO, or UNKNOWN.
+    
+    UNKNOWN transactions require manual user review.
+    """
+    # 1. initialize
+    previous_balance = summary["starting_balance"]
+        
+    # keywords
+    ABONO_KEYWORDS = [
+        "SPEI RECIBIDO",
+        "DEPOSITO",
+        "ABONO",
+        "REEMBOLSO",
+        "DEVOLUC",
+        "INTERESES",
+        "BECAS",
+        "BECA"
+    ]
+
+    CARGO_KEYWORDS = [
+        "SPEI ENVIADO",
+        "RETIRO CAJERO",
+        "RETIRO CAJERO AUTOMATICO",
+        "PAGO TARJETA DE CREDITO",
+        "COMISION",
+        "IVA",
+        "EFECTIVO SEGURO"
+    ]
+
+    # 2. classify each transaction
+    for transaction in transactions:
+        current_balance = transaction["saldo_liquidacion"]
+        amount_abs = transaction["amount_abs"]
+        description = transaction["description"]
+        
+        # Initialize review flag
+        transaction["needs_review"] = False
+
+        # case A: Has balance (more reliable)
+        if current_balance is not None:
+
+            # compare with previous balance
+            if current_balance > previous_balance:
+                # balance went up: income
+                transaction["movement_type"] = "ABONO"
+                transaction["amount"] = amount_abs
+                print("abono case a")
+
+            elif current_balance < previous_balance:
+                # balance went down: expense
+                transaction["movement_type"] = "CARGO"
+                transaction["amount"] = -amount_abs
+                print("cargo case a")
+            
+            else:
+                # current balance == previous balance (rare edge case)
+                # Try saldo_operacion first, then keywords
+                
+                saldo_op = transaction["saldo_operacion"]
+                
+                if saldo_op is not None and saldo_op != previous_balance:
+                    # Use saldo_operacion to determine type
+                    if saldo_op > previous_balance:
+                        transaction["movement_type"] = "ABONO"
+                        transaction["amount"] = amount_abs
+                        print("abono case a igual (saldo_operacion)")
+                    else:  # saldo_op < previous_balance
+                        transaction["movement_type"] = "CARGO"
+                        transaction["amount"] = -amount_abs
+                        print("cargo case a igual (saldo_operacion)")
+                else:
+                    # Can't use saldo_operacion - fall back to keywords
+                    description_upper = description.upper()
+                    
+                    is_abono = False
+                    for keyword in ABONO_KEYWORDS:
+                        if keyword in description_upper:
+                            is_abono = True
+                            break
+                    
+                    if is_abono:
+                        transaction["movement_type"] = "ABONO"
+                        transaction["amount"] = amount_abs
+                        print("abono case a igual (keywords)")
+                    else:
+                        # Check CARGO keywords
+                        is_cargo = False
+                        for keyword in CARGO_KEYWORDS:
+                            if keyword in description_upper:
+                                is_cargo = True
+                                break
+                        
+                        if is_cargo:
+                            transaction["movement_type"] = "CARGO"
+                            transaction["amount"] = -amount_abs
+                            print("cargo case a igual (keywords)")
+                        else:
+                            # ✅ UNKNOWN - user must decide
+                            transaction["movement_type"] = "UNKNOWN"
+                            transaction["amount"] = None
+                            transaction["needs_review"] = True
+                            print("unknown case a igual (no keywords)")
+
+            previous_balance = current_balance
+                    
+        # case B: No balance (use keywords)
+        else:
+            # convert description to uppercase for comparison
+            description_upper = description.upper()
+
+            # check abono keywords first
+            is_abono = False
+            for keyword in ABONO_KEYWORDS:
+                if keyword in description_upper:
+                    is_abono = True
+                    break
+            
+            if is_abono:
+                transaction["movement_type"] = "ABONO"
+                transaction["amount"] = amount_abs
+                print("abono case b")
+            else:
+                # Check CARGO keywords
+                is_cargo = False
+                for keyword in CARGO_KEYWORDS:
+                    if keyword in description_upper:
+                        is_cargo = True
+                        break
+                
+                if is_cargo:
+                    transaction["movement_type"] = "CARGO"
+                    transaction["amount"] = -amount_abs
+                    print("cargo case b")
+                else:
+                    # ✅ UNKNOWN - user must decide
+                    transaction["movement_type"] = "UNKNOWN"
+                    transaction["amount"] = None
+                    transaction["needs_review"] = True
+                    print("unknown case b (no keywords)")
+
+    # 3. validation (skip UNKNOWN transactions)
+    
+    # calculate totals 
+    total_abonos = 0
+    total_cargos = 0
+    count_abonos = 0
+    count_cargos = 0
+    count_unknown = 0
+
+    for transaction in transactions:
+        if transaction["movement_type"] == "ABONO":
+            total_abonos += transaction["amount"]
+            count_abonos += 1
+        elif transaction["movement_type"] == "CARGO":
+            total_cargos += abs(transaction["amount"])
+            count_cargos += 1
+        else:  # UNKNOWN
+            count_unknown += 1
+
+    # compare with summary
+    expected_abonos = summary["deposits_amount"]
+    expected_cargos = summary["charges_amount"]
+    expected_count_abonos = summary["n_deposits"]
+    expected_count_cargos = summary["n_charges"]
+
+    # Report classification results
+    print(f"\n{'='*70}")
+    print("CLASSIFICATION SUMMARY")
+    print(f"{'='*70}")
+    print(f"✅ Abonos classified: {count_abonos}")
+    print(f"✅ Cargos classified: {count_cargos}")
+    print(f"⚠️  Unknown (need review): {count_unknown}")
+    print(f"{'='*70}\n")
+
+    # validate amounts (only for classified transactions)
+    if abs(total_abonos - expected_abonos) > 0.1:
+        print(f"WARNING: Abonos total mismatch: calculated {total_abonos:.2f}, expected {expected_abonos:.2f}")
+
+    if abs(total_cargos - expected_cargos) > 0.1:
+        print(f"WARNING: Cargos total mismatch: calculated {total_cargos:.2f}, expected {expected_cargos:.2f}")
+
+    # Note: counts won't match if there are UNKNOWN transactions
+    missing_abonos = expected_count_abonos - count_abonos
+    missing_cargos = expected_count_cargos - count_cargos
+    
+    if missing_abonos > 0:
+        print(f"INFO: {missing_abonos} abonos pending classification (likely in UNKNOWN)")
+    
+    if missing_cargos > 0:
+        print(f"INFO: {missing_cargos} cargos pending classification (likely in UNKNOWN)")
+    
+    # Check if UNKNOWN count matches expected missing
+    expected_unknown = missing_abonos + missing_cargos
+    if count_unknown != expected_unknown:
+        print(f"WARNING: Unknown count ({count_unknown}) doesn't match expected missing ({expected_unknown})")
+
+    return transactions
+
+
 if __name__ == "__main__":
     pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
-    
+    pdf_path2023 = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_2023.pdf"
+
     # Extract raw lines
     transaction_lines = extract_transaction_lines(pdf_path)
     
@@ -177,11 +484,18 @@ if __name__ == "__main__":
         if parsed:
             parsed_transactions.append(parsed)
     
+    #shitty
+    print(f"{'='*70}\n")
+    print(parsed_transactions[0])
+    print(extract_statement_summary(pdf_path))
+
+
     # Summary
     print(f"\n{'='*70}")
     print(f"SUCCESSFULLY PARSED: {len(parsed_transactions)}/{len(transaction_lines)}")
     print(f"{'='*70}\n")
-    
+
+    '''
     # Show first 10 in clean format
     print("\nFirst 10 transactions:")
     for i, trans in enumerate(parsed_transactions[:10], 1):
@@ -200,3 +514,8 @@ if __name__ == "__main__":
     print(f"Empty descriptions: {empty_descriptions}")
     print(f"Complete transactions (with balance): {complete_transactions}")
     print(f"Incomplete transactions (no balance): {incomplete_transactions}")
+    '''
+
+    summary = extract_statement_summary(pdf_path)
+    determine_transaction_type(parsed_transactions, summary)
+
