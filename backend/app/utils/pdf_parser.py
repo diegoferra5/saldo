@@ -465,9 +465,6 @@ def determine_transaction_type(transactions, summary):
     return transactions
 
 
-
-
-
 if __name__ == "__main__":
     pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
     pdf_path2023 = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_2023.pdf"
