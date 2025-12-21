@@ -1,55 +1,58 @@
-from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional
-import uuid
+from uuid import UUID
+
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 
 
 class UserBase(BaseModel):
-    """
-    Base user schema with common attributes.
-    """
     email: EmailStr
     full_name: Optional[str] = None
 
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if v else v
+
 
 class UserCreate(UserBase):
-    """
-    Schema for creating a new user (signup).
-    Includes password field.
-    """
+    """Signup payload."""
     password: str = Field(..., min_length=8, max_length=100)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class UserLogin(BaseModel):
-    """
-    Schema for user login.
-    """
+    """Login payload."""
     email: EmailStr
     password: str
 
+    model_config = ConfigDict(extra="forbid")
+
 
 class UserResponse(UserBase):
-    """
-    Schema for returning user data.
-    Does NOT include password.
-    """
-    id: uuid.UUID
+    """Public user data (no password)."""
+    id: UUID
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True  # Allows conversion from SQLAlchemy models
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
 class UserInDB(UserBase):
-    """
-    Schema for user stored in database.
-    Includes hashed password (internal use only).
-    """
-    id: uuid.UUID
+    """Internal schema (includes hashed_password)."""
+    id: UUID
     hashed_password: str
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    model_config = ConfigDict(extra="forbid")
+
+class TokenWithUser(Token):
+    user: UserResponse
+    model_config = ConfigDict(extra="forbid")

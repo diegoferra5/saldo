@@ -1,172 +1,204 @@
 # 💰 Saldo
 
-> Personal finance control for Mexico - In development
+> Personal finance control for Mexico — **MVP in development**
 
-Saldo is an application that helps Mexicans manage their personal finances through automatic analysis of bank statements.
+**Saldo** is a personal finance web application built for the **Mexican banking ecosystem**.  
+It helps users understand, organize, and improve their finances by **automatically analyzing bank statements**.
 
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python)](https://www.python.org)
-[![Status](https://img.shields.io/badge/Status-In%20Development-yellow)](https://github.com/diegoferra5/saldo)
+Built with a **backend-first MVP approach**, focused on correctness, performance, and real-world constraints.
 
 ---
 
 ## 🎯 What is Saldo?
 
-A personal finance app that:
-- 📄 **Analyzes PDF bank statements** from Mexican banks (BBVA, Santander, Banorte)
-- 🤖 **Automatically categorizes transactions** (food, transport, entertainment)
-- 📊 **Tracks budgets** by category
-- 💬 **Provides financial advice** with AI (GPT-4)
+Saldo allows users to:
 
-**Why?** Most finance apps are designed for USA/Europe. Saldo is built for the Mexican banking ecosystem.
+- 📄 **Upload bank statements (PDF)** from Mexican banks (BBVA, Santander, Banorte)
+- 🧠 **Automatically parse and classify transactions**
+- 📊 **Track spending and budgets by category**
+- 🤖 **Receive financial insights via AI (LLM-powered)**
+
+**Why Saldo?**  
+Most personal finance tools are built for the US or Europe. Mexican users face:
+- different bank formats
+- limited API availability
+- poor local support
+
+Saldo is designed **specifically for Mexico**, starting with real bank PDFs.
 
 ---
-
 ## 🚀 Current Status
 
-**Phase:** MVP Backend - Week 1 (14% complete)
+**Phase:** MVP Backend — Week 1  
+**Progress:** Models & DB architecture completed ✅
 
-**Completed:**
+### Completed
 - ✅ Project structure
-- ✅ FastAPI configured
-- ✅ Basic API running
-- ✅ Auto-generated documentation
+- ✅ FastAPI setup
+- ✅ PostgreSQL schema (Supabase)
+- ✅ SQLAlchemy models (mapping-only)
+- ✅ BBVA PDF parser (≈85% accuracy on modern statements)
 
-**In Progress:**
-- 🔄 Database (PostgreSQL/Supabase)
-- 🔄 Authentication system (JWT)
-- 🔄 BBVA PDF parser
-- 🔄 Transaction endpoints
+### In Progress
+- 🔄 Pydantic schemas
+- 🔄 Authentication (JWT)
+- 🔄 Statement upload & parsing endpoints
 
-**Coming Soon:**
-- 📋 Frontend (Next.js)
-- 📋 Smart categorization
-- 📋 Budget dashboard
-- 📋 Mobile app
+### Next
+- 📋 Frontend MVP (Next.js)
+- 📋 Transaction dashboard
+- 📋 Budget tracking
+- 📋 AI-powered insights
 
 ---
 
 ## 🛠️ Tech Stack
 
-**Backend:**
-- FastAPI (Python 3.11)
-- PostgreSQL (Supabase)
-- SQLAlchemy
-- JWT Authentication
-- pdfplumber (PDF extraction)
-- OpenAI GPT-4 (financial advice)
+### Backend
+- **FastAPI** (Python 3.11)
+- **PostgreSQL** (Supabase)
+- **SQLAlchemy** (mapping-only ORM)
+- **JWT authentication**
+- **pdfplumber** (PDF extraction)
+- **LLM integration** (financial insights)
 
-**Frontend** *(planned)*:
-- Next.js + React
+### Frontend *(planned)*
+- Next.js
+- React
 - Tailwind CSS
 
 ---
 
+## 🧠 Architectural Principles
+
+- **Database = Source of Truth**
+  - Constraints and indexes live in PostgreSQL
+  - ORM only maps existing schema
+- **Soft delete for financial data**
+  - Accounts are never hard-deleted
+- **Passive deletes**
+  - Database handles cascades
+- **Conservative parsing**
+  - `UNKNOWN` is preferred over incorrect classification
+- **MVP-first**
+  - Simple, explicit, extensible
+
+---
+
 ## 💻 Quick Start
+
 ```bash
-# Clone
+# Clone repository
 git clone https://github.com/diegoferra5/saldo.git
 cd saldo/backend
 
-# Setup
+# Setup virtual environment
 python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 
-# Run
+# Run API
 uvicorn app.main:app --reload
-```
+````
 
-API available at: http://localhost:8000  
-Documentation: http://localhost:8000/docs
+* API: [http://localhost:8000](http://localhost:8000)
+* Docs (Swagger): [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
 ## 📁 Project Structure
+
 ```
 saldo/
-├── backend/
-│   ├── app/
-│   │   ├── main.py          # API entry point
-│   │   ├── core/            # Config, DB, Auth
-│   │   ├── models/          # Database models
-│   │   ├── routes/          # API endpoints
-│   │   ├── services/        # Business logic
-│   │   └── utils/           # PDF parser, helpers
-│   └── requirements.txt
-├── frontend/                 # (TODO)
-└── docs/
+├── app/
+│   ├── main.py            # FastAPI entry point
+│   ├── core/              # DB, config, security
+│   ├── models/            # SQLAlchemy models
+│   ├── schemas/           # Pydantic schemas
+│   ├── api/               # API routes
+│   ├── services/          # Business logic
+│   └── parsers/           # Bank PDF parsers
+├── tests/                 # (planned)
+├── .env
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## 🎯 Roadmap
+## 🏦 Supported Banks
 
-### MVP (8 weeks - Feb 2026)
-1. **Weeks 1-4:** Backend API
-   - User authentication
-   - Bank statement parser (BBVA)
-   - Transaction & budget CRUD
-   - GPT-4 integration
-
-2. **Weeks 5-6:** Frontend
-   - Transaction dashboard
-   - Budget management
-   - AI chat interface
-
-3. **Weeks 7-8:** Beta Launch
-   - Testing with 50 real users
-   - Production deployment
-   - Feedback & iteration
-
-### Post-MVP
-- Multi-bank support (Santander, Banorte, etc.)
-- Mobile app (React Native)
-- Real-time banking API (Belvo)
-- Shared budgets
-- Savings goals
+| Bank        | Status      |
+| ----------- | ----------- |
+| BBVA México | ✅ Supported |
+| Santander   | 🛠 Planned  |
+| Banorte     | 🛠 Planned  |
+| HSBC        | 📋 Future   |
+| Banamex     | 📋 Future   |
 
 ---
 
-## 🏦 Target Banks
+## 🗺️ Roadmap
 
-| Bank | Status |
-|------|--------|
-| BBVA México | 🎯 Priority 1 |
-| Santander | 📋 Planned |
-| Banorte | 📋 Planned |
-| HSBC | 📋 Planned |
-| Banamex | 📋 Future |
+### MVP (8 weeks — Feb 2026)
+
+**Weeks 1–4**
+
+* Backend API
+* Authentication
+* Statement parsing
+* Transaction & budget logic
+
+**Weeks 5–6**
+
+* Frontend MVP
+* Dashboard & visualizations
+* AI insights UI
+
+**Weeks 7–8**
+
+* Closed beta (50 users)
+* Feedback & iteration
+* Production deployment
+
+### Post-MVP
+
+* Multi-bank support
+* Recurring expense detection
+* Personalized ML models
+* Mobile app
+* Banking API integration (Belvo or similar)
 
 ---
 
 ## 👨‍💻 Author
 
-**Diego Ferra**  
-Data Engineer/Scientist 
+**Diego Ferra**
+Data Scientist / Engineer
 
-[ferradiego5@gmail.com] • [www.linkedin.com/in/diego-ferra-b7b6082bb] 
+📧 [ferradiego5@gmail.com](mailto:ferradiego5@gmail.com)
+🔗 [https://www.linkedin.com/in/diego-ferra-b7b6082bb](https://www.linkedin.com/in/diego-ferra-b7b6082bb)
 
 ---
 
-## 📝 Notes
+## ⚠️ Disclaimer
 
-- This is a personal project in active development
-- Not professional financial advice
-- Designed specifically for the Mexican market
-- Open source under MIT license
+* This is an experimental personal finance tool
+* Not professional financial advice
+* Designed for educational and informational purposes
+* Open source under MIT License
 
 ---
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE)
+MIT License — see [LICENSE](LICENSE)
 
 ---
 
-<div align="center">
-
-**Status:** 🚧 Under active construction  
+**Status:** 🚧 Actively under development
 **Last updated:** December 2025
 
-</div>
+
