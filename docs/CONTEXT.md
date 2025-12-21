@@ -1,7 +1,7 @@
 # Saldo - Estado del Proyecto
 **Fecha:** 20 de Diciembre, 2025
-**Fase:** Week 1, Day 7 - FASE 3 Completada ✅
-**Siguiente:** Bug Fixes + Service Layer → Endpoints
+**Fase:** Week 1, Day 7 - SERVICE LAYER COMPLETO ✅
+**Siguiente:** API Endpoints (Dec 21) → Frontend (Week 2)
 
 ---
 
@@ -151,17 +151,46 @@ transactions
 - [x] determine_transaction_type() - Clasifica CARGO/ABONO/UNKNOWN
 - [x] 85% accuracy en statements modernos (2024-2025)
 
-### **⏳ FASE 6 - Bug Fixes & Utilities (Siguiente - 30 min)**
-- [ ] Fix AccountType enum case (DB constraints → uppercase)
-- [ ] Add `needs_review` to parser return dict
-- [ ] Create `date_helpers.py` (parse DD/MMM → full date)
-- [ ] Create `hash_helpers.py` (transaction deduplication)
+### **✅ FASE 6 - Service Layer (Completada - Dec 20)**
+- [x] `transaction_service.py` completo:
+  - create_transaction_from_parser_dict() - Single insert
+  - create_transactions_from_parser_output() - Batch insert (SAVEPOINT)
+  - get_transactions_by_user() - Query + filters + pagination
+  - update_transaction_classification() - Manual edits
+  - count_transactions_by_type() - Stats
+  - IntegrityError handling + rollback
+  - Limit clamping (1-500)
+  - Decimal precision (hash computed after conversion)
 
-### **⏳ FASE 7 - Service Layer (2-3 horas)**
-- [ ] Transaction service (create, query, update)
-- [ ] Statement service (upload, parse integration)
-- [ ] Account service (CRUD operations)
-- [ ] Unit tests para services
+- [x] `statement_service.py` completo:
+  - save_file_temporarily() - Upload handling
+  - calculate_file_hash() - Duplicate detection
+  - create_statement_record() - DB insert
+  - get_user_statements() - Query + filters
+  - get_statement_by_id() - Security check
+  - delete_statement() - File + DB cleanup
+  - process_statement() - Full pipeline (parse → classify → insert)
+
+- [x] `account_service.py` completo:
+  - get_or_create_account() - Idempotent
+  - list_user_accounts() - Query + filters
+  - get_account_by_id() - Security check
+  - update_account() - Edit display_name
+  - deactivate_account() - Soft delete
+
+**Key Patterns:**
+- SAVEPOINT for batch operations
+- Security: all queries filter by user_id
+- Soft delete pattern
+- Race condition handling
+
+### **⏳ FASE 7 - API Endpoints (Siguiente - 6-8 horas)**
+- [ ] Dependencies setup (get_current_user, get_db)
+- [ ] Statement routes (upload, process, list, get, delete)
+- [ ] Transaction routes (list, get, update, stats)
+- [ ] Account routes (list, get, update, delete)
+- [ ] Router registration in main.py
+- [ ] Manual API testing
 
 ### **⏳ FASE 8 - API Endpoints (6-8 horas)**
 - [ ] Auth endpoints (register, login, /me)
@@ -197,17 +226,17 @@ transactions
 
 ## 🎯 Roadmap Detallado - 8 Semanas
 
-### **Week 1 (Dec 13-20)** ✅ ~85% Completa
+### **Week 1 (Dec 13-21)** ✅ 85% Completa
 - [x] Database setup (Supabase)
 - [x] Models ORM (SQLAlchemy)
 - [x] Pydantic schemas
 - [x] Core & Security
 - [x] BBVA PDF Parser
-- [ ] **→ Bug fixes (30 min)**
-- [ ] **→ Service layer (2-3 hrs)**
-- [ ] **→ API endpoints (6-8 hrs)**
+- [x] **Service layer (transaction, statement, account)** ✅
+- [ ] **→ API endpoints (6-8 hrs)** - Tomorrow (Dec 21)
 
 **Meta Week 1:** API funcional que puede parsear PDFs y retornar transacciones
+**Progress:** 25 hrs invertidas / ~6-8 hrs restantes
 
 ---
 
@@ -413,9 +442,9 @@ PROJECT/
 │   │   │       ├── statements.py      # ⏳ Upload endpoint
 │   │   │       └── transactions.py    # ⏳ Transaction endpoints
 │   │   ├── services/
-│   │   │   ├── transaction_service.py # ⏳ Transaction business logic
-│   │   │   ├── statement_service.py   # ⏳ Statement + parse
-│   │   │   └── account_service.py     # ⏳ Account CRUD
+│   │   │   ├── transaction_service.py # ✅ Transaction business logic
+│   │   │   ├── statement_service.py   # ✅ Statement + parse
+│   │   │   └── account_service.py     # ✅ Account CRUD
 │   │   └── utils/
 │   │       ├── pdf_parser.py          # ✅ BBVA parser
 │   │       ├── date_helpers.py        # ⏳ Date parsing utilities
@@ -586,23 +615,50 @@ PROJECT/
 
 ## 🔑 Próximos Pasos Inmediatos
 
-### **HOY (30 min):**
-1. Fix AccountType enum case → uppercase
-2. Add `needs_review` to parser dict
-3. Create date_helpers.py
-4. Create hash_helpers.py
+### **MAÑANA (Dec 21 - 6-8 hrs):**
 
-### **Esta Semana (10-15 hrs):**
-5. Create service layer (transaction, statement, account)
-6. Build API endpoints (auth, accounts, upload, transactions)
-7. Write integration tests
+**Priority 1: Setup (30 min)**
+1. Create `app/dependencies.py` (get_current_user, get_db)
+2. Add missing Pydantic schemas (StatementUploadResponse, StatementProcessResponse)
+
+**Priority 2: Statement Endpoints (2-3 hrs)**
+3. Create `app/routes/statements.py`:
+   - POST /api/statements/upload
+   - POST /api/statements/{id}/process
+   - GET /api/statements
+   - GET /api/statements/{id}
+   - DELETE /api/statements/{id}
+
+**Priority 3: Transaction Endpoints (2-3 hrs)**
+4. Create `app/routes/transactions.py`:
+   - GET /api/transactions (filters)
+   - GET /api/transactions/{id}
+   - PATCH /api/transactions/{id}
+   - GET /api/transactions/stats
+
+**Priority 4: Account Endpoints (1-2 hrs)**
+5. Create `app/routes/accounts.py`:
+   - GET /api/accounts
+   - GET /api/accounts/{id}
+   - PATCH /api/accounts/{id}
+   - DELETE /api/accounts/{id}
+
+**Priority 5: Router Registration (15 min)**
+6. Update `app/main.py` - Include all routers
+
+**Priority 6: Testing (1-2 hrs)**
+7. Manual API testing with Postman/curl
+
+### **Week 2 (Dec 22-27 - 20-30 hrs):**
 8. Deploy backend to Railway
-
-### **Week 2 (20-30 hrs):**
 9. Setup Next.js frontend
-10. Build Auth UI
-11. Build Upload + Transaction list
-12. Connect frontend ↔ backend
+10. Build Auth UI (login, register)
+11. Build Upload interface (drag & drop)
+12. Build Transaction list (table + filters)
+13. Connect frontend ↔ backend
+14. Deploy frontend to Vercel
+
+**Target End of Week 2:** Usuario puede usar app end-to-end
 
 ---
 
@@ -656,9 +712,35 @@ PROJECT/
 
 ---
 
-**Última actualización:** 20 Dic 2025, 22:00 CST
-**Estado actual:** Backend 85% completo, frontend 0%
-**Blocker actual:** Bug fixes (30 min) → Service layer (3 hrs) → Endpoints (8 hrs)
-**Target Week 1:** API funcional deployada a Railway
-**Target Week 2:** Usuario puede usar app end-to-end
+**Última actualización:** 20 Dic 2025, 23:30 CST
+**Estado actual:** Backend service layer completo (85%), endpoints pendientes (15%)
+**Próximo paso:** API Endpoints (6-8 hrs) - Tomorrow Dec 21
+**Target Week 1 (Dec 21):** API funcional completa
+**Target Week 2 (Dec 27):** Usuario puede usar app end-to-end
 **Target Feb 9:** 50+ usuarios activos, $500 MRR
+
+---
+
+## 📝 Session Summary (Dec 20, PM)
+
+**Completed:**
+- ✅ Service Layer completado (4 hrs)
+  - transaction_service.py
+  - statement_service.py
+  - account_service.py
+- ✅ Production-ready patterns implemented:
+  - SAVEPOINT for batch operations
+  - IntegrityError handling
+  - Security: user_id filtering
+  - Soft delete pattern
+  - Race condition handling
+
+**Next Session (Dec 21):**
+- Build API endpoints (6-8 hrs)
+- Start with statements.py (upload endpoint)
+- Test full upload → parse → list flow
+- Target: Functional API ready for frontend integration
+
+**Key Decision Made:**
+- Service layer reviewed by external developer - all recommendations implemented
+- Code is production-ready and endpoint-ready

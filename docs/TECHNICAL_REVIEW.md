@@ -1,26 +1,34 @@
 # Saldo - Technical Review & Architecture Analysis
 **Date:** December 20, 2025
-**Phase:** FASE 3 Complete - Pre-Endpoint Development
+**Phase:** SERVICE LAYER COMPLETE - Pre-Endpoint Development
 **Reviewer:** Claude Code
 **Status:** READY FOR ENDPOINT DEVELOPMENT ✅
 
 ---
 
-## 1. EXECUTIVE SUMMARY
+# 1. EXECUTIVE SUMMARY
 
-### Overall Assessment: EXCELLENT ARCHITECTURE ✅
+### Overall Assessment: EXCELLENT ARCHITECTURE + SERVICE LAYER COMPLETE ✅
 
-Your application has a **solid, production-ready foundation** with excellent separation of concerns and consistent patterns. The ORM models, Pydantic schemas, and PDF parser are well-architected and ready for API endpoint development.
+Your application now has a **complete backend foundation** with service layer, utilities, and production-ready patterns. The architecture follows best practices with proper separation of concerns.
+
+**Completed Components:**
+- ✅ Database schema (Supabase PostgreSQL)
+- ✅ ORM models (SQLAlchemy with proper relationships)
+- ✅ Pydantic schemas (validation + serialization)
+- ✅ PDF Parser (BBVA with 85% accuracy)
+- ✅ Service Layer (transaction, statement, account services)
+- ✅ Utilities (date parsing, hash computation)
 
 **Key Strengths:**
-- Clean separation: Database layer → ORM → Schemas → API (future)
-- Consistent enum usage and naming conventions
-- Proper foreign key relationships with cascade policies
-- Conservative parser design (UNKNOWN > incorrect classification)
-- Production-ready security setup (JWT, bcrypt, password hashing)
+- Clean three-tier architecture: Database → Service → API (endpoints next)
+- Consistent patterns across all service layers
+- Production-ready deduplication (transaction hashing)
+- SAVEPOINT strategy for batch inserts
+- Security-first design (user isolation in all queries)
+- Soft delete pattern for financial data
 
-**Critical Issues Found:** 3 (all fixable in < 30 minutes)
-**Minor Inconsistencies:** 5 (nice-to-have improvements)
+**Status:** All critical issues resolved, ready for endpoint development
 
 ---
 
@@ -1094,40 +1102,86 @@ class User(Base):
 
 ---
 
-## 13. NEXT STEPS PRIORITY
+## 13. COMPLETED WORK & NEXT STEPS
 
-### Immediate (Before Building Endpoints)
+### ✅ Completed Service Layer (Dec 20, 2025)
 
-1. **Fix AccountType Case** (10 min)
-   - Update DB constraints to uppercase
-   - OR update enum to lowercase
-   - Be consistent across all models
+**Created Files:**
+1. ✅ `app/services/transaction_service.py` - Complete with:
+   - `create_transaction_from_parser_dict()` - Single transaction insert
+   - `create_transactions_from_parser_output()` - Batch insert with SAVEPOINT
+   - `get_transactions_by_user()` - Query with filters + pagination
+   - `update_transaction_classification()` - Manual edits
+   - `count_transactions_by_type()` - Stats for dashboard
 
-2. **Add Utility Modules** (20 min)
-   - Create `app/utils/date_helpers.py`
-   - Create `app/utils/hash_helpers.py`
-   - Add unit tests
+2. ✅ `app/services/statement_service.py` - Complete with:
+   - `save_file_temporarily()` - Upload handling
+   - `calculate_file_hash()` - Duplicate detection
+   - `create_statement_record()` - DB insert with validation
+   - `get_user_statements()` - Query with filters
+   - `get_statement_by_id()` - Security-checked fetch
+   - `delete_statement()` - File + DB cleanup
+   - `process_statement()` - Full PDF → Transactions pipeline
 
-3. **Update Parser Output** (10 min)
-   - Add `needs_review` to return dict in `parse_transaction_line()`
-   - Verify it gets set correctly by `determine_transaction_type()`
+3. ✅ `app/services/account_service.py` - Complete with:
+   - `get_or_create_account()` - Idempotent account management
+   - `list_user_accounts()` - Query with filters
+   - `get_account_by_id()` - Security-checked fetch
+   - `update_account()` - Edit display_name
+   - `deactivate_account()` - Soft delete
 
-### This Week (Endpoint Development)
+**Key Patterns Implemented:**
+- SAVEPOINT strategy for batch operations
+- IntegrityError handling with rollback
+- Security: all queries filter by user_id
+- Normalization helpers for consistent data
+- Race condition handling
+- Soft delete (never hard delete financial data)
 
-4. **Create Service Layer** (2-3 hours)
-   - `app/services/transaction_service.py`
-   - `app/services/statement_service.py`
-   - Handle parser→DB conversion logic
+### 🎯 Tomorrow's Tasks (Endpoint Development - 6-8 hours)
 
-5. **Build Endpoints** (4-6 hours)
-   - Start with accounts (simpler)
-   - Then statement upload
-   - Then transaction list/update
+**Priority 1: Dependencies & Setup (30 min)**
+1. Create `app/dependencies.py`:
+   - `get_current_user()` (extract from security.py)
+   - `get_db()` (already in database.py)
 
-6. **Integration Testing** (2-3 hours)
-   - End-to-end upload flow
-   - Verify all transformations work
-   - Test edge cases
+2. Create `app/schemas/statements.py` missing schemas:
+   - `StatementUploadResponse`
+   - `StatementProcessResponse`
+
+**Priority 2: Statement Endpoints (2-3 hours)**
+1. Create `app/routes/statements.py`:
+   - `POST /api/statements/upload` - File upload + metadata
+   - `POST /api/statements/{id}/process` - Parse PDF
+   - `GET /api/statements` - List user statements
+   - `GET /api/statements/{id}` - Get statement details
+   - `DELETE /api/statements/{id}` - Delete statement
+
+**Priority 3: Transaction Endpoints (2-3 hours)**
+2. Create `app/routes/transactions.py`:
+   - `GET /api/transactions` - List with filters
+   - `GET /api/transactions/{id}` - Get single transaction
+   - `PATCH /api/transactions/{id}` - Update classification
+   - `GET /api/transactions/stats` - Count by type
+
+**Priority 4: Account Endpoints (1-2 hours)**
+3. Create `app/routes/accounts.py`:
+   - `GET /api/accounts` - List user accounts
+   - `GET /api/accounts/{id}` - Get account details
+   - `PATCH /api/accounts/{id}` - Update display_name
+   - `DELETE /api/accounts/{id}` - Soft delete
+
+**Priority 5: Router Registration (15 min)**
+4. Update `app/main.py`:
+   - Include all routers with `/api` prefix
+   - Test with Postman/curl
+
+**Priority 6: Testing (1-2 hours)**
+5. Manual API testing:
+   - Upload PDF → Process → List transactions
+   - Update transaction classification
+   - Verify deduplication works
+   - Test error cases
 
 ---
 

@@ -15,14 +15,13 @@
 | **Pydantic Schemas** | ✅ Complete | 100% | 4 hrs |
 | **Core & Security** | ✅ Complete | 100% | 2 hrs |
 | **PDF Parser** | ✅ Complete | 100% | 8 hrs |
-| **Bug Fixes** | ⏳ Pending | 0% | 0.5 hrs estimated |
-| **Service Layer** | ⏳ Pending | 0% | 3 hrs estimated |
-| **API Endpoints** | ⏳ Pending | 0% | 8 hrs estimated |
+| **Service Layer** | ✅ Complete | 100% | 4 hrs |
+| **API Endpoints** | ⏳ Next | 0% | 6-8 hrs estimated |
 | **Frontend** | ⏳ Not Started | 0% | 30 hrs estimated |
 | **Deployment** | ⏳ Not Started | 0% | 4 hrs estimated |
 
-**Total Time Invested:** ~21 hours
-**Remaining to MVP:** ~45 hours
+**Total Time Invested:** ~25 hours
+**Remaining to MVP:** ~40 hours
 **Target Launch:** Week 4 (Jan 4-10, 2026)
 
 ---
@@ -191,101 +190,118 @@
 
 ---
 
-## ⏳ In Progress - Week 1 Remaining
+### Day 7 (Dec 20 PM) - Service Layer Complete
+**Time:** 4 hours
 
-### Bug Fixes & Utilities (30 min)
-**Status:** Not started
-**Blocked by:** Technical review identified issues
+#### Service Layer Development:
+- [x] Created `app/services/transaction_service.py`:
+  - `_to_decimal()` - Safe numeric conversion
+  - `_movement_type_to_db_value()` - Validation helper
+  - `_compute_signed_amount()` - Amount calculation logic
+  - `create_transaction_from_parser_dict()` - Single insert with SAVEPOINT
+  - `create_transactions_from_parser_output()` - Batch insert
+  - `get_transactions_by_user()` - Query with filters + pagination + limit clamping
+  - `update_transaction_classification()` - Manual edits + auto-commit
+  - `count_transactions_by_type()` - Stats for dashboard
+  - IntegrityError handling with rollback
+  - Decimal precision handling (hash computed AFTER Decimal conversion)
+  - Movement type validation (must not be None)
 
-#### Tasks:
-- [ ] Fix AccountType enum case inconsistency
-  - Update DB constraints to uppercase (DEBIT, CREDIT, INVESTMENT)
-  - Add INVESTMENT to AccountType enum
-- [ ] Add `needs_review` to parser return dict
-  - Edit `parse_transaction_line()` line 148
-  - Add `'needs_review': True` as default value
-- [ ] Create `app/utils/date_helpers.py`
-  - `parse_bbva_date(date_str, statement_month)` function
-  - Converts '11/NOV' → date(2025, 11, 11)
-  - Handles year rollover (Jan statement with Dec transactions)
-  - Validation function
-  - Unit tests
-- [ ] Create `app/utils/hash_helpers.py`
-  - `compute_transaction_hash()` function
-  - SHA256 for deduplication
-  - Validation function
-  - Unit tests
+- [x] Created `app/services/statement_service.py`:
+  - `sanitize_filename()` - Security helper
+  - `calculate_file_hash()` - SHA256 for duplicate detection
+  - `save_file_temporarily()` - Upload to /tmp with validation
+  - `create_statement_record()` - DB insert with duplicate prevention
+  - `get_user_statements()` - Query with filters
+  - `get_statement_by_id()` - Security-checked fetch
+  - `delete_statement()` - File + DB cleanup
+  - `process_statement()` - Full pipeline:
+    - Parse PDF
+    - Classify transactions
+    - Get-or-create Account
+    - Link Statement to Account
+    - Batch insert transactions
+    - Update parsing status
+    - Single commit for atomicity
 
-**Estimated Time:** 30 minutes
-**Blocking:** Service layer development
+- [x] Created `app/services/account_service.py`:
+  - `ALLOWED_ACCOUNT_TYPES` constant (DEBIT, CREDIT)
+  - `_normalize_bank_name()` - Validation helper
+  - `_normalize_account_type()` - Validation helper
+  - `get_or_create_account()` - Idempotent with reactivation
+  - `list_user_accounts()` - Query with filters
+  - `get_account_by_id()` - Security-checked fetch
+  - `update_account()` - Edit display_name
+  - `deactivate_account()` - Soft delete
+  - Race condition handling
+
+**Key Patterns:**
+- SAVEPOINT (`begin_nested()`) for batch operations
+- IntegrityError → rollback → retry pattern
+- Security: ALL queries filter by user_id
+- Normalization helpers for data consistency
+- Soft delete (never hard delete financial data)
+- Optional display_name auto-fill on get_or_create
+
+**Deliverable:** Complete service layer ready for endpoints ✅
 
 ---
 
-### Service Layer (2-3 hours)
-**Status:** Not started
-**Dependencies:** Bug fixes complete
-
-#### Tasks:
-- [ ] Create `app/services/transaction_service.py`:
-  - `create_transaction_from_parser_dict()` - Transform parser → ORM
-  - `get_transactions_by_user()` - Query with filters
-  - `update_transaction_classification()` - Manual edits
-  - `count_transactions_by_type()` - Stats for dashboard
-  - Unit tests
-- [ ] Create `app/services/statement_service.py`:
-  - `upload_and_parse_statement()` - Orchestrates upload + parse
-  - `update_parsing_status()` - Updates statement status
-  - Error handling
-  - Unit tests
-- [ ] Create `app/services/account_service.py`:
-  - `create_account()` - CRUD create
-  - `get_user_accounts()` - CRUD read
-  - `update_account()` - CRUD update
-  - `soft_delete_account()` - Set is_active=False
-  - Unit tests
-
-**Estimated Time:** 2-3 hours
-**Blocking:** API endpoints
+## ⏳ In Progress - Week 1 Remaining
 
 ---
 
 ### API Endpoints (6-8 hours)
-**Status:** Not started
-**Dependencies:** Service layer complete
+**Status:** Next task (Tomorrow - Dec 21)
+**Dependencies:** ✅ Service layer complete
 
-#### Tasks:
-- [ ] Create `app/api/deps.py`:
-  - get_db dependency (already in core/database.py)
-  - get_current_user dependency (already in core/security.py)
-  - Centralize dependencies
-- [ ] Create `app/api/v1/auth.py`:
-  - POST /api/auth/register (UserCreate → Token)
-  - POST /api/auth/login (UserLogin → Token)
-  - GET /api/auth/me (Token → UserResponse)
-  - Error handling (401, 409 email exists)
-- [ ] Create `app/api/v1/accounts.py`:
-  - POST /api/accounts (AccountCreate → AccountResponse)
+#### Roadmap for Tomorrow:
+**Priority 1: Setup (30 min)**
+- [ ] Create `app/dependencies.py`:
+  - Extract `get_current_user()` from security.py
+  - Import `get_db()` from database.py
+- [ ] Add missing Pydantic schemas:
+  - `StatementUploadResponse`
+  - `StatementProcessResponse`
+
+**Priority 2: Statement Endpoints (2-3 hrs)**
+- [ ] Create `app/routes/statements.py`:
+  - POST /api/statements/upload (File + Form → StatementResponse)
+  - POST /api/statements/{id}/process (Parse PDF → ProcessResponse)
+  - GET /api/statements (→ List[StatementList])
+  - GET /api/statements/{id} (→ StatementResponse)
+  - DELETE /api/statements/{id} (soft delete)
+
+**Priority 3: Transaction Endpoints (2-3 hrs)**
+- [ ] Create `app/routes/transactions.py`:
+  - GET /api/transactions (filters → List[TransactionList])
+  - GET /api/transactions/{id} (→ TransactionResponse)
+  - PATCH /api/transactions/{id} (TransactionUpdate → TransactionResponse)
+  - GET /api/transactions/stats (→ count by type)
+
+**Priority 4: Account Endpoints (1-2 hrs)**
+- [ ] Create `app/routes/accounts.py`:
   - GET /api/accounts (→ List[AccountList])
   - GET /api/accounts/{id} (→ AccountResponse)
   - PATCH /api/accounts/{id} (AccountUpdate → AccountResponse)
   - DELETE /api/accounts/{id} (soft delete)
-- [ ] Create `app/api/v1/statements.py`:
-  - POST /api/statements/upload (File + Form → StatementResponse)
-  - GET /api/statements (→ List[StatementList])
-  - GET /api/statements/{id} (→ StatementResponse)
-- [ ] Create `app/api/v1/transactions.py`:
-  - GET /api/transactions (filters → List[TransactionList])
-  - GET /api/transactions/{id} (→ TransactionResponse)
-  - PATCH /api/transactions/{id} (TransactionUpdate → TransactionResponse)
-- [ ] Create `app/main.py`:
-  - Include all routers
-  - CORS middleware
-  - Error handlers
-  - Startup/shutdown events
-- [ ] Integration tests
+
+**Priority 5: Router Registration (15 min)**
+- [ ] Update `app/main.py`:
+  - Include all routers with `/api` prefix
+  - CORS middleware (if needed)
+  - Test endpoints with Postman/curl
+
+**Priority 6: Testing (1-2 hrs)**
+- [ ] Manual API tests:
+  - Upload PDF → Process → List transactions
+  - Update transaction classification
+  - Verify deduplication works
+  - Test error cases
 
 **Estimated Time:** 6-8 hours
-**Blocking:** Frontend development
+**Target Completion:** End of Week 1 (Dec 21)
+**Blocking:** Frontend development (Week 2)
 
 ---
 
