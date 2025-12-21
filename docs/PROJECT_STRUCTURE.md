@@ -1,700 +1,622 @@
-# FinTwin Project Structure Guide
+# Saldo - Project Structure Guide
+**Purpose:** Reference guide for WHERE files are located and WHAT each file does
+**Audience:** Future you, new developers, collaborators
+**Last Updated:** December 20, 2025
 
-**Purpose**: This document explains every folder and file in the AstraFin project.  
-**Audience**: Future you, collaborators, or anyone maintaining this codebase.  
-**Last Updated**: December 13, 2025
+---
+
+## 🎯 Quick Navigation
+
+**Looking for something specific?**
+- New to the project? → Start with "High-Level Overview" below
+- Need to add a feature? → Jump to "Where Do I Put..." section
+- Want to understand data flow? → Check `ARCHITECTURE_DIAGRAM.md` instead
+- Technical details? → See `TECHNICAL_REVIEW.md`
+
+---
+
+## 📚 Document Relationships
+
+### This Document (PROJECT_STRUCTURE.md)
+**What it is:** File system guide - WHERE things are
+**Use when:** "Where do I put my new endpoint?"
+**Example answer:** `backend/app/api/v1/auth.py`
+
+### ARCHITECTURE_DIAGRAM.md
+**What it is:** Data flow guide - HOW things connect
+**Use when:** "How does PDF upload work?"
+**Example answer:** Shows diagram: User → API → Parser → Service → DB
+
+### TECHNICAL_REVIEW.md
+**What it is:** Code quality analysis - WHAT needs fixing
+**Use when:** "What bugs exist in my code?"
+**Example answer:** Lists 3 critical issues with solutions
 
 ---
 
 ## 🏗️ High-Level Overview
+
 ```
-ASTRAFIN/PROJECT/
-├── backend/          # Server-side application (FastAPI + Python)
-├── frontend/         # Client-side application (Next.js + React) [Week 2+]
-├── docs/             # Project documentation
-├── .gitignore        # Files Git should ignore
-└── README.md         # Project overview & quick start
+/Users/diegoferra/Documents/ASTRAFIN/PROJECT/
+├── backend/          # Server (FastAPI + Python) - Week 1
+├── frontend/         # Client (Next.js + React) - Week 2
+├── docs/             # Documentation you're reading now
+├── .gitignore        # What Git ignores (secrets, dependencies)
+└── README.md         # Quick start guide
 ```
+
+**Current Focus:** Backend (Week 1)
+**Next:** Frontend (Week 2)
+**Both deployed:** Week 4
 
 ---
 
 ## 📂 Backend Structure (Detailed)
 
-### Root Level Files
+### Root Level (`/backend/`)
 
-| File | Purpose | Example Content |
-|------|---------|-----------------|
-| `requirements.txt` | Python dependencies list | `fastapi==0.104.1` |
-| `.env` | **SECRET** environment variables | Database passwords, API keys |
-| `.env.example` | Template for `.env` (safe to commit) | `DATABASE_URL=postgresql://...` |
-| `README.md` | Backend-specific documentation | Setup instructions, API docs |
+| File/Folder | Purpose | Status |
+|-------------|---------|--------|
+| `app/` | Main application code | ✅ Complete |
+| `tests/` | Automated tests | ⏳ Week 1 |
+| `uploads/` | Temporary PDF storage | Created |
+| `venv/` | Virtual environment (Python packages) | ✅ Active |
+| `main.py` | FastAPI entry point | ⏳ Week 1 |
+| `requirements.txt` | Python dependencies list | ✅ Complete |
+| `.env` | **SECRET** environment variables | ✅ Configured |
+| `.env.example` | Template (safe to commit) | ✅ Created |
+| `README.md` | Backend-specific docs | ⏳ Todo |
 
-**🔒 Security Note**: `.env` contains secrets and is in `.gitignore`. Never commit it to Git!
-
----
-
-### `backend/app/` - Main Application Code
-
-This is where your FastAPI application lives.
-
-#### `app/main.py` - 🚀 Application Entry Point
-
-**What it does**: 
-- Creates the FastAPI app instance
-- Registers all route blueprints (auth, transactions, etc.)
-- Configures middleware (CORS, security headers)
-- Defines startup/shutdown events (database connections)
-
-**Example code structure**:
-```python
-from fastapi import FastAPI
-from app.routes import auth, transactions
-
-app = FastAPI(title="AstraFin API")
-
-app.include_router(auth.router)
-app.include_router(transactions.router)
-
-@app.get("/")
-def root():
-    return {"message": "AstraFin API is running"}
-```
-
-**When you modify it**: 
-- Adding new route modules
-- Changing API metadata (title, description)
-- Adding global middleware
+**Security Note:** `.env` is in `.gitignore` - never commit secrets!
 
 ---
 
-### `app/core/` - Core Configuration
+### Core Configuration (`backend/app/core/`)
 
-**Purpose**: Application-wide settings and utilities that other modules depend on.
+**Purpose:** Application-wide settings that everything else depends on
 
-#### `core/config.py` - ⚙️ Settings & Environment Variables
+| File | What It Does | Key Functions | Status |
+|------|-------------|---------------|--------|
+| `config.py` | Loads environment variables | `Settings` class (DATABASE_URL, SECRET_KEY) | ✅ Done |
+| `database.py` | Database connection setup | `engine`, `SessionLocal`, `get_db()` | ✅ Done |
+| `security.py` | Authentication & encryption | `hash_password()`, `create_access_token()`, `get_current_user()` | ✅ Done |
 
-**What it does**:
-- Loads environment variables from `.env`
-- Defines app configuration (database URL, secret keys)
-- Provides typed settings using Pydantic
+**When to modify:**
+- **config.py:** Adding new environment variables
+- **database.py:** Changing connection pool settings
+- **security.py:** Changing JWT expiration, adding 2FA
 
-**Example**:
+**Example usage:**
 ```python
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    DATABASE_URL: str
-    SECRET_KEY: str
-    ENVIRONMENT: str = "development"
-    
-    class Config:
-        env_file = ".env"
-
-settings = Settings()
-```
-
-**When you modify it**: 
-- Adding new environment variables
-- Changing default values
-
----
-
-#### `core/security.py` - 🔐 Authentication & Security
-
-**What it does**:
-- Password hashing (bcrypt)
-- JWT token creation and validation
-- Password verification
-- Token decoding
-
-**Example functions**:
-```python
-def hash_password(password: str) -> str:
-    """Convert plain password to bcrypt hash"""
-    
-def verify_password(plain: str, hashed: str) -> bool:
-    """Check if password matches hash"""
-    
-def create_access_token(user_id: str) -> str:
-    """Generate JWT token for authenticated user"""
-```
-
-**When you modify it**: 
-- Changing token expiration time
-- Adding refresh token logic
-- Implementing 2FA
-
----
-
-#### `core/database.py` - 🗄️ Database Connection
-
-**What it does**:
-- Creates SQLAlchemy engine (connection to PostgreSQL)
-- Defines SessionLocal (database session factory)
-- Provides `get_db()` dependency for routes
-
-**Example**:
-```python
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-engine = create_engine(settings.DATABASE_URL)
-SessionLocal = sessionmaker(bind=engine)
-
-def get_db():
-    """Dependency that provides database session to routes"""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-```
-
-**When you modify it**: 
-- Adding connection pooling settings
-- Configuring database timeouts
-
----
-
-### `app/models/` - 📊 Database Tables (SQLAlchemy ORM)
-
-**Purpose**: Define what your database tables look like in Python code.
-
-#### `models/user.py` - User Table
-
-**What it does**: Defines the `users` table structure.
-
-**Example**:
-```python
-from sqlalchemy import Column, String, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
-
-class User(Base):
-    __tablename__ = "users"
-    
-    id = Column(String, primary_key=True)
-    email = Column(String, unique=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String)
-    created_at = Column(DateTime)
-```
-
-**Database equivalent**:
-```sql
-CREATE TABLE users (
-    id VARCHAR PRIMARY KEY,
-    email VARCHAR UNIQUE NOT NULL,
-    hashed_password VARCHAR NOT NULL,
-    full_name VARCHAR,
-    created_at TIMESTAMP
-);
-```
-
-**When you modify it**: 
-- Adding new user fields (phone, avatar_url)
-- Changing field types
-
----
-
-#### `models/transaction.py` - Transaction Table
-
-**What it does**: Stores individual bank transactions.
-
-**Key fields**:
-- `amount`: Transaction value (negative = expense, positive = income)
-- `description`: Merchant name (e.g., "STARBUCKS COFFEE")
-- `category`: Auto-assigned category (e.g., "Eating Out")
-- `transaction_date`: When transaction occurred
-- `user_id`: Foreign key to `users` table
-
-**When you modify it**: 
-- Adding receipt_url field
-- Adding tags or notes
-
----
-
-#### `models/statement.py` - Statement Upload Metadata
-
-**What it does**: Tracks uploaded PDF bank statements.
-
-**Key fields**:
-- `bank_name`: "BBVA", "Santander", etc.
-- `statement_month`: Month this statement covers
-- `parsing_status`: "pending", "success", "failed"
-- `file_name`: Original uploaded filename
-
-**Why separate from transactions**: 
-- One statement → many transactions
-- Track parsing failures
-- Allow re-parsing if needed
-
----
-
-#### `models/budget.py` - User Budget Limits
-
-**What it does**: Stores user-defined spending limits per category.
-
-**Example**:
-```python
-class Budget(Base):
-    __tablename__ = "budgets"
-    
-    id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey("users.id"))
-    category = Column(String)  # "Eating Out"
-    monthly_limit = Column(Numeric(10, 2))  # 500.00
-    is_active = Column(Boolean, default=True)
-```
-
----
-
-### `app/schemas/` - 📝 Data Validation (Pydantic)
-
-**Purpose**: Define what data your API accepts and returns.
-
-**Key Difference from Models**:
-- **Models** = Database structure (SQLAlchemy)
-- **Schemas** = API input/output validation (Pydantic)
-
-#### `schemas/user.py` - User API Schemas
-
-**Example**:
-```python
-from pydantic import BaseModel, EmailStr
-
-class UserCreate(BaseModel):
-    """Data required to create a user"""
-    email: EmailStr
-    password: str
-    full_name: str
-
-class UserResponse(BaseModel):
-    """Data returned when fetching a user (no password!)"""
-    id: str
-    email: str
-    full_name: str
-    created_at: datetime
-```
-
-**Why this matters**:
-- Input validation: FastAPI rejects invalid emails automatically
-- Security: Never return passwords in API responses
-- Documentation: Auto-generates OpenAPI docs
-
----
-
-#### `schemas/auth.py` - Authentication Schemas
-
-**Example**:
-```python
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-```
-
----
-
-#### `schemas/transaction.py` - Transaction Schemas
-
-**Example**:
-```python
-class TransactionResponse(BaseModel):
-    id: str
-    amount: float
-    description: str
-    category: str
-    transaction_date: date
-    
-    class Config:
-        from_attributes = True  # Allows conversion from SQLAlchemy model
-```
-
----
-
-### `app/routes/` - 🛣️ API Endpoints (FastAPI Routers)
-
-**Purpose**: Define HTTP endpoints (URLs) that clients can call.
-
-#### `routes/auth.py` - Authentication Endpoints
-
-**Endpoints**:
-```python
-POST /api/auth/register  # Create new user account
-POST /api/auth/login     # Get JWT token
-GET  /api/auth/me        # Get current user info
-```
-
-**Example code**:
-```python
-from fastapi import APIRouter, Depends
-from app.schemas.auth import LoginRequest, TokenResponse
-from app.services.auth_service import authenticate_user
-
-router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-
-@router.post("/login", response_model=TokenResponse)
-def login(credentials: LoginRequest, db: Session = Depends(get_db)):
-    user = authenticate_user(db, credentials.email, credentials.password)
-    token = create_access_token(user.id)
-    return {"access_token": token}
-```
-
-**When you modify it**: 
-- Adding password reset
-- Adding OAuth (Google login)
-
----
-
-#### `routes/statements.py` - Statement Upload
-
-**Endpoints**:
-```python
-POST /api/statements/upload  # Upload PDF bank statement
-GET  /api/statements         # List user's uploaded statements
-GET  /api/statements/{id}    # Get specific statement details
-```
-
-**Example**:
-```python
-@router.post("/upload")
-async def upload_statement(
-    file: UploadFile,
-    bank: str,
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import get_current_user
+
+# In your endpoint:
+@app.get("/protected")
+def protected_route(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user)
 ):
-    # Save file temporarily
-    # Parse PDF
-    # Store transactions
-    # Return results
+    return {"user": user.email}
 ```
 
 ---
 
-#### `routes/transactions.py` - Transaction Queries
+### Database Models (`backend/app/models/`)
 
-**Endpoints**:
+**Purpose:** Define database table structure using SQLAlchemy ORM
+
+**Philosophy:**
+- Models ONLY map to existing database schema
+- NO business logic here (that goes in services)
+- NO validation here (that goes in Pydantic schemas)
+- Database is source of truth (constraints enforced in DB)
+
+| File | Table | Key Fields | Relationships | Status |
+|------|-------|------------|---------------|--------|
+| `user.py` | users | id, email, hashed_password, full_name | → accounts, statements, transactions | ✅ Done |
+| `account.py` | accounts | id, user_id, bank_name, account_type, is_active | ← user, → statements, transactions | ✅ Done |
+| `statement.py` | statements | id, user_id, account_id, file_name, parsing_status | ← user, account, → transactions | ✅ Done |
+| `transaction.py` | transactions | id, user_id, account_id, statement_id, date, amount, movement_type | ← user, account, statement | ✅ Done |
+
+**Key Patterns:**
+
+**Soft Delete (Accounts):**
 ```python
-GET /api/transactions              # List all user transactions
-GET /api/transactions/{id}         # Get single transaction
-PUT /api/transactions/{id}         # Update transaction (change category)
-DELETE /api/transactions/{id}      # Delete transaction
+# DON'T: db.delete(account)
+# DO:
+account.is_active = False
+db.commit()
 ```
+
+**Passive Deletes:**
+```python
+# All relationships have passive_deletes=True
+# Let PostgreSQL handle CASCADE/SET NULL automatically
+accounts = relationship("Account", passive_deletes=True)
+```
+
+**When to modify:**
+- Adding new table → Create new model file
+- Adding field to existing table → Update model + run migration
 
 ---
 
-#### `routes/budgets.py` - Budget Management
+### API Schemas (`backend/app/schemas/`)
 
-**Endpoints** (Week 3):
+**Purpose:** Validate HTTP request/response data using Pydantic
+
+**Difference from Models:**
+- **Models (SQLAlchemy)** = Database structure
+- **Schemas (Pydantic)** = API input/output validation
+
+| File | Schemas Defined | Use Case | Status |
+|------|----------------|----------|--------|
+| `user.py` | UserCreate, UserLogin, UserResponse, Token | Auth endpoints | ✅ Done |
+| `account.py` | AccountCreate, AccountUpdate, AccountResponse, AccountList | Account CRUD | ✅ Done |
+| `statement.py` | StatementUploadForm, StatementResponse, StatementList | Upload endpoint | ✅ Done |
+| `transactions.py` | TransactionResponse, TransactionUpdate, TransactionList | Transaction endpoints | ✅ Done |
+
+**Key Features:**
+
+**Enums:**
 ```python
-POST   /api/budgets       # Create budget
-GET    /api/budgets       # List budgets
-PUT    /api/budgets/{id}  # Update budget
-DELETE /api/budgets/{id}  # Delete budget
+# app/schemas/account.py
+class AccountType(str, Enum):
+    debit = "DEBIT"
+    credit = "CREDIT"
+    investment = "INVESTMENT"
 ```
+
+**Validators:**
+```python
+# Auto-normalize input
+@field_validator("email")
+@classmethod
+def lowercase_email(cls, v: str) -> str:
+    return v.lower().strip()
+```
+
+**Security:**
+```python
+# Prevent extra fields (injection attack prevention)
+model_config = ConfigDict(extra="forbid")
+```
+
+**When to modify:**
+- Adding new endpoint → Create corresponding schemas
+- Adding field validation → Add field_validator
+- Changing API response → Update Response schemas
 
 ---
 
-### `app/services/` - 🧠 Business Logic
+### API Endpoints (`backend/app/api/`)
 
-**Purpose**: Complex operations that routes delegate to. Keeps routes clean.
+**Purpose:** HTTP endpoints that clients call
 
-**Analogy**: 
-- Routes = Cashier (takes orders)
-- Services = Chef (does the actual work)
-
-#### `services/auth_service.py` - Authentication Logic
-
-**Functions**:
-```python
-def register_user(db, email, password, full_name):
-    """
-    1. Check if email already exists
-    2. Hash password
-    3. Create user in database
-    4. Return user object
-    """
-
-def authenticate_user(db, email, password):
-    """
-    1. Find user by email
-    2. Verify password matches hash
-    3. Return user if valid, raise error if not
-    """
+**Structure:**
+```
+app/api/
+├── deps.py           # Shared dependencies (get_db, get_current_user)
+└── v1/               # API version 1
+    ├── auth.py       # Authentication endpoints
+    ├── accounts.py   # Account CRUD
+    ├── statements.py # PDF upload
+    └── transactions.py # Transaction management
 ```
 
-**Why separate from routes**: 
-- Reusable (can call from multiple routes)
-- Testable (test without HTTP)
-- Clean separation of concerns
+**Endpoint Patterns:**
+
+| HTTP Method | Pattern | Purpose | Example |
+|-------------|---------|---------|---------|
+| POST | `/resource` | Create | `POST /api/accounts` |
+| GET | `/resources` | List all | `GET /api/accounts` |
+| GET | `/resource/{id}` | Get one | `GET /api/accounts/uuid` |
+| PATCH | `/resource/{id}` | Update | `PATCH /api/accounts/uuid` |
+| DELETE | `/resource/{id}` | Delete | `DELETE /api/accounts/uuid` |
+
+**Example Endpoint:**
+```python
+# app/api/v1/accounts.py
+from fastapi import APIRouter, Depends
+from app.schemas.account import AccountCreate, AccountResponse
+from app.core.security import get_current_user
+
+router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
+
+@router.post("/", response_model=AccountResponse)
+def create_account(
+    account: AccountCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    # Business logic goes in services, not here
+    return account_service.create_account(db, user.id, account)
+```
+
+**Status:**
+- ⏳ **Not started** - Week 1 task (after service layer)
+
+**When to modify:**
+- Adding new feature → Create new endpoint
+- Changing API behavior → Update endpoint logic
+- Adding filters → Add query parameters
 
 ---
 
-#### `services/parser_service.py` - PDF Parsing Orchestration
+### Business Logic (`backend/app/services/`)
 
-**Functions**:
-```python
-def parse_statement(file_path: str, bank: str):
-    """
-    1. Detect bank type
-    2. Call appropriate parser (BBVA, Santander, etc.)
-    3. Validate extracted transactions
-    4. Return list of transactions
-    """
+**Purpose:** Complex operations that endpoints delegate to
 
-def save_parsed_transactions(db, user_id, transactions):
-    """
-    1. Categorize each transaction
-    2. Insert into database
-    3. Update statement status
-    """
+**Why separate from endpoints?**
+- **Reusability:** Same logic can be called from multiple endpoints
+- **Testability:** Test business logic without HTTP layer
+- **Clean code:** Endpoints become thin wrappers
+
+**Planned Services:**
+
+| File | Responsibility | Key Functions | Status |
+|------|---------------|---------------|--------|
+| `transaction_service.py` | Transaction operations | create_transaction_from_parser_dict(), get_transactions_by_user(), update_transaction_classification() | ⏳ Week 1 |
+| `statement_service.py` | Statement + parsing | upload_and_parse_statement(), update_parsing_status() | ⏳ Week 1 |
+| `account_service.py` | Account CRUD | create_account(), get_user_accounts(), soft_delete_account() | ⏳ Week 1 |
+
+**Example Flow:**
 ```
+Endpoint (HTTP layer)
+  ↓ Validates input (Pydantic)
+  ↓ Calls Service
+     ↓ Performs business logic
+     ↓ Calls Model (Database layer)
+        ↓ Saves to PostgreSQL
+     ↓ Returns ORM instance
+  ↓ Converts to Response schema (Pydantic)
+  ↓ Returns JSON
+```
+
+**When to create:**
+- Logic spans multiple endpoints → Extract to service
+- Operation involves multiple database queries → Service
+- Need to test without HTTP → Service
 
 ---
 
-#### `services/transaction_service.py` - Transaction CRUD
+### Utilities (`backend/app/utils/`)
 
-**Functions**:
+**Purpose:** Small, reusable helper functions
+
+| File | What It Does | Key Functions | Status |
+|------|-------------|---------------|--------|
+| `pdf_parser.py` | Extract data from BBVA PDFs | extract_transaction_lines(), parse_transaction_line(), determine_transaction_type() | ✅ Done |
+| `date_helpers.py` | Date parsing utilities | parse_bbva_date('11/NOV', statement_month) | ⏳ Week 1 |
+| `hash_helpers.py` | Transaction deduplication | compute_transaction_hash() | ⏳ Week 1 |
+
+**Parser Functions Explained:**
+
 ```python
-def get_user_transactions(db, user_id, filters):
-    """Query transactions with optional filters (date range, category)"""
+# 1. Extract raw lines from PDF
+extract_transaction_lines(pdf_path)
+→ Returns: ["11/NOV 11/NOV STARBUCKS 150.00 10948.46", ...]
 
-def update_transaction_category(db, transaction_id, new_category):
-    """Allow user to correct auto-categorization"""
-
-def calculate_spending_by_category(db, user_id, month):
-    """Aggregate spending for budget tracking"""
-```
-
----
-
-#### `services/categorization.py` - Auto-Categorization
-
-**What it does**: Assigns categories to transactions based on description.
-
-**Example**:
-```python
-PATTERNS = {
-    "Eating Out": ["STARBUCKS", "MCDONALDS", "RESTAURANTE"],
-    "Groceries": ["WALMART", "SORIANA", "CHEDRAUI"],
-    "Transport": ["UBER", "GASOLINA", "PEMEX"]
+# 2. Parse each line into dict
+parse_transaction_line(line)
+→ Returns: {
+    'date': '11/NOV',
+    'description': 'STARBUCKS',
+    'amount_abs': 150.00,
+    'saldo_liquidacion': 10948.46
 }
 
-def categorize(description: str) -> str:
-    for category, keywords in PATTERNS.items():
-        if any(kw in description.upper() for kw in keywords):
-            return category
-    return "Other"
+# 3. Classify as CARGO/ABONO/UNKNOWN
+determine_transaction_type(transactions, summary)
+→ Modifies transactions in-place, sets:
+    'movement_type': 'CARGO' | 'ABONO' | 'UNKNOWN'
+    'amount': -150.00 (negative for expenses)
+    'needs_review': True/False
 ```
+
+**Parser Accuracy:**
+- Modern PDFs (2024-2025): **85% auto-classified**
+- Older PDFs (pre-2024): **45% auto-classified** (less balance info)
+
+**When to modify:**
+- Adding Santander parser → Create new file
+- Improving BBVA accuracy → Modify pdf_parser.py
+- Adding new utility → Create new file
 
 ---
 
-### `app/utils/` - 🔧 Utility Helpers
+### Tests (`backend/tests/`)
 
-**Purpose**: Small, reusable functions that don't fit elsewhere.
+**Purpose:** Automated testing to catch bugs
 
-#### `utils/pdf_parser.py` - BBVA PDF Extraction
+**Planned Structure:**
+```
+tests/
+├── test_auth.py          # Auth endpoint tests
+├── test_parser.py        # PDF parser tests
+├── test_services.py      # Service layer tests
+├── test_date_helpers.py  # Utility tests
+├── test_hash_helpers.py  # Utility tests
+└── test_integration.py   # End-to-end tests
+```
 
-**What it does**: Low-level PDF text extraction for BBVA statements.
+**Test Types:**
 
-**Example**:
+**Unit Tests:**
 ```python
-import pdfplumber
-
-def extract_bbva_transactions(pdf_path: str):
-    """
-    1. Open PDF with pdfplumber
-    2. Find transaction table
-    3. Extract date, description, amount, balance
-    4. Return list of dicts
-    """
-    transactions = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            table = page.extract_table()
-            # Parse table rows...
-    return transactions
+def test_parse_bbva_date():
+    """Test date parsing logic"""
+    result = parse_bbva_date('11/NOV', date(2025, 11, 1))
+    assert result == date(2025, 11, 11)
 ```
 
----
-
-#### `utils/validators.py` - Custom Validation
-
-**Example**:
+**Integration Tests:**
 ```python
-def is_valid_mexican_date(date_str: str) -> bool:
-    """Validate DD/MM/YYYY format"""
-    
-def sanitize_amount(amount_str: str) -> float:
-    """Convert '$1,234.56' to 1234.56"""
+def test_upload_and_parse_flow():
+    """Test complete upload → parse → store flow"""
+    # 1. Upload PDF
+    # 2. Parse transactions
+    # 3. Verify in database
 ```
 
----
+**Status:** ⏳ Week 1-4 (tests written alongside code)
 
-### `backend/tests/` - 🧪 Automated Tests
-
-**Purpose**: Verify code works correctly and catch bugs early.
-
-#### `tests/test_auth.py` - Authentication Tests
-
-**Example**:
-```python
-def test_register_user():
-    """Test user registration endpoint"""
-    response = client.post("/api/auth/register", json={
-        "email": "test@example.com",
-        "password": "secure123",
-        "full_name": "Test User"
-    })
-    assert response.status_code == 200
-    assert "access_token" in response.json()
-```
+**When to write:**
+- Before building feature (TDD) → Write test first
+- After building feature → Write test immediately
+- Fixing bug → Write failing test, then fix
 
 ---
 
-#### `tests/test_parser.py` - PDF Parser Tests
+## 📁 Frontend Structure (Week 2)
 
-**Example**:
-```python
-def test_bbva_parser():
-    """Test BBVA PDF extraction"""
-    transactions = parse_bbva_statement("test_statement.pdf")
-    assert len(transactions) > 0
-    assert transactions[0]["amount"] < 0  # Expense
-```
-
----
-
-### `backend/uploads/` - 📁 Temporary File Storage
-
-**Purpose**: Store uploaded PDFs temporarily before parsing.
-
-**Security**:
-- Files deleted after 24 hours (Week 4 task)
-- Not committed to Git (in `.gitignore`)
-- Only accessible to authenticated users
-
-**`.gitkeep`**: Empty file that forces Git to track the folder structure.
-
----
-
-## 📋 Frontend Structure (Week 2+)
 ```
 frontend/
 ├── src/
-│   ├── app/              # Next.js 13+ app directory
-│   ├── components/       # Reusable UI components
-│   ├── lib/              # API clients, utilities
-│   └── styles/           # CSS/Tailwind
-├── public/               # Static assets (images, icons)
-└── package.json          # JavaScript dependencies
+│   ├── app/                    # Next.js 14 App Router
+│   │   ├── (auth)/
+│   │   │   ├── login/         # Login page
+│   │   │   └── register/      # Register page
+│   │   ├── (dashboard)/
+│   │   │   ├── page.tsx       # Main dashboard
+│   │   │   ├── upload/        # PDF upload page
+│   │   │   ├── transactions/  # Transaction list
+│   │   │   └── budgets/       # Budget management
+│   │   ├── layout.tsx         # Root layout
+│   │   └── globals.css
+│   ├── components/
+│   │   ├── ui/                # Shadcn/ui components (buttons, inputs, etc.)
+│   │   ├── TransactionTable.tsx
+│   │   ├── UploadDropzone.tsx
+│   │   └── BudgetCard.tsx
+│   ├── lib/
+│   │   ├── api.ts             # API client (calls backend)
+│   │   ├── utils.ts           # Helper functions
+│   │   └── auth.ts            # JWT token management
+│   └── styles/
+│       └── globals.css
+├── public/                     # Static assets (images, icons)
+├── package.json               # JavaScript dependencies
+├── tsconfig.json              # TypeScript config
+└── tailwind.config.ts         # Tailwind CSS config
+```
+
+**Tech Stack:**
+- **Framework:** Next.js 14 (App Router, Server Components)
+- **Language:** TypeScript 5
+- **Styling:** Tailwind CSS 3
+- **Components:** Shadcn/ui (Radix UI primitives)
+- **State:** Zustand (lightweight state management)
+- **Data Fetching:** TanStack Query (React Query)
+- **Forms:** React Hook Form + Zod validation
+- **Charts:** Recharts
+- **Icons:** Lucide React
+
+**Key Pages:**
+
+| Route | Component | Purpose | Week |
+|-------|-----------|---------|------|
+| `/login` | Login page | User authentication | 2 |
+| `/register` | Register page | User signup | 2 |
+| `/` | Dashboard | Summary cards, charts | 2 |
+| `/upload` | Upload page | PDF upload interface | 2 |
+| `/transactions` | Transaction list | View/filter/edit transactions | 2 |
+| `/budgets` | Budget page | Create/track budgets | 3 |
+
+**Status:** ⏳ Not started (Week 2)
+
+---
+
+## 📚 Documentation (`/docs/`)
+
+| File | Purpose | Use When |
+|------|---------|----------|
+| `CONTEXT.md` | Current project state, roadmap, tech stack | "What's the overall status?" |
+| `PROGRESS_LOG.md` | Detailed log of what's done/pending | "What did I complete today?" |
+| `PROJECT_STRUCTURE.md` | This file! File system guide | "Where do I put X?" |
+| `ARCHITECTURE_DIAGRAM.md` | Data flow diagrams | "How does X work?" |
+| `TECHNICAL_REVIEW.md` | Code quality analysis (14 sections) | "What bugs exist?" |
+| `EXECUTIVE_SUMMARY.md` | Quick 2-min review summary | "TL;DR of technical review?" |
+| `BUG_FIX_ROADMAP.md` | Step-by-step bug fix guide | "How do I fix these bugs?" |
+| `PDF_PARSER.md` | Parser details & performance | "How accurate is the parser?" |
+
+---
+
+## 🎯 Where Do I Put...?
+
+### New API Endpoint
+**Location:** `backend/app/api/v1/`
+**Steps:**
+1. Create function in appropriate file (auth.py, accounts.py, etc.)
+2. Use router decorator: `@router.post("/path")`
+3. Add to main.py: `app.include_router(router)`
+
+### New Database Table
+**Location:** `backend/app/models/`
+**Steps:**
+1. Create new model file (e.g., `budget.py`)
+2. Define class inheriting from `Base`
+3. Run migration: `alembic revision --autogenerate`
+
+### Business Logic
+**Location:** `backend/app/services/`
+**Steps:**
+1. Create service file (e.g., `budget_service.py`)
+2. Define functions that endpoints will call
+3. Import in endpoint file
+
+### Helper Function
+**Location:** `backend/app/utils/`
+**Steps:**
+1. Create utility file (e.g., `validators.py`)
+2. Define function
+3. Import where needed
+
+### React Component
+**Location:** `frontend/src/components/`
+**Steps:**
+1. Create .tsx file (e.g., `BudgetCard.tsx`)
+2. Export component
+3. Import in page
+
+### New Page
+**Location:** `frontend/src/app/`
+**Steps:**
+1. Create folder with page.tsx (e.g., `budgets/page.tsx`)
+2. Implement component
+3. Add navigation link
+
+---
+
+## 🔄 Typical Data Flows
+
+### User Uploads PDF
+```
+1. Frontend: User drags PDF → UploadDropzone component
+2. Frontend: Validates file (type, size)
+3. Frontend: POST /api/statements/upload (multipart/form-data)
+4. Backend: statements.py endpoint receives request
+5. Backend: Calls statement_service.upload_and_parse_statement()
+6. Service: Saves PDF to uploads/ folder
+7. Service: Calls pdf_parser.extract_transaction_lines()
+8. Parser: Returns list of transaction dicts
+9. Service: Calls transaction_service.create_transaction_from_parser_dict() for each
+10. Service: Updates statement.parsing_status = "success"
+11. Backend: Returns StatementResponse (JSON)
+12. Frontend: Shows success message + parsing results
+```
+
+### User Views Transactions
+```
+1. Frontend: GET /api/transactions?start_date=2025-11-01
+2. Backend: transactions.py endpoint
+3. Backend: Calls transaction_service.get_transactions_by_user(filters)
+4. Service: Queries database with filters
+5. Database: Returns Transaction ORM instances
+6. Service: Returns list of Transactions
+7. Backend: Converts to TransactionList schemas (Pydantic)
+8. Backend: Returns JSON array
+9. Frontend: TransactionTable renders data
 ```
 
 ---
 
-## 🗂️ Docs Folder
+## 🚫 .gitignore - What's Ignored
 
-| File | Purpose |
-|------|---------|
-| `PROJECT_STRUCTURE.md` | This file! Structure documentation |
-| `API_DOCUMENTATION.md` | API endpoint reference (Week 2) |
-| `DEPLOYMENT_GUIDE.md` | How to deploy to Railway (Week 4) |
-| `USER_GUIDE.md` | End-user instructions (Week 5) |
+**Categories:**
 
----
+**Secrets:**
+- `.env` (contains DATABASE_URL, SECRET_KEY)
+- `*.key`, `*.pem`
 
-## 🚫 .gitignore - What Git Ignores
+**Dependencies:**
+- `venv/`, `node_modules/`
+- `__pycache__/`, `*.pyc`
 
-**Categories**:
-- **Secrets**: `.env`, API keys
-- **Dependencies**: `venv/`, `node_modules/`
-- **Build artifacts**: `__pycache__/`, `dist/`
-- **User uploads**: `uploads/*` (except `.gitkeep`)
-- **OS files**: `.DS_Store`, `Thumbs.db`
+**Build Artifacts:**
+- `dist/`, `build/`
+- `.next/`
 
-**Why this matters**: Prevents committing 5GB of dependencies or leaking passwords.
+**User Files:**
+- `uploads/*` (PDFs uploaded by users)
+- `.DS_Store` (macOS)
 
----
-
-## 📖 README.md Files
-
-### Root `README.md`
-- Project overview
-- Quick start guide
-- Links to detailed docs
-
-### `backend/README.md`
-- Backend-specific setup
-- API documentation link
-- Development workflow
+**Why this matters:** Prevents committing 5GB of dependencies or leaking passwords
 
 ---
 
-## 🎯 File Naming Conventions
+## 📝 Naming Conventions
 
-| Pattern | Meaning | Example |
-|---------|---------|---------|
-| `snake_case.py` | Python files | `auth_service.py` |
-| `PascalCase` | Classes | `class User(Base)` |
-| `SCREAMING_CASE` | Constants | `SECRET_KEY` |
-| `__init__.py` | Package marker | Makes folder a Python package |
-
----
-
-## 🔄 Data Flow Example
-
-**User uploads BBVA statement**:
-```
-1. User → POST /api/statements/upload (routes/statements.py)
-2. Route → Save file to uploads/ folder
-3. Route → Call parser_service.parse_statement()
-4. Service → Call utils/pdf_parser.extract_bbva_transactions()
-5. Utils → Extract transactions from PDF
-6. Service → Call categorization.categorize() for each transaction
-7. Service → Save to database via models/transaction.py
-8. Route → Return success response to user
-```
+| Type | Convention | Example |
+|------|-----------|---------|
+| Python files | snake_case.py | `transaction_service.py` |
+| Python classes | PascalCase | `class User(Base)` |
+| Python functions | snake_case | `def get_user_by_email()` |
+| Constants | SCREAMING_CASE | `SECRET_KEY` |
+| TypeScript files | PascalCase.tsx | `TransactionTable.tsx` |
+| React components | PascalCase | `export function TransactionTable()` |
 
 ---
 
-## 🆘 Quick Reference
+## 💡 Quick Tips
 
-**"Where do I put..."**
+### Finding Things
+- **Search by filename:** `cmd+p` in VS Code
+- **Search by content:** `cmd+shift+f` in VS Code
+- **Find function definition:** `cmd+click` on function name
 
-| Task | Location |
-|------|----------|
-| New API endpoint | `app/routes/` |
-| Database table | `app/models/` |
-| Business logic | `app/services/` |
-| Input validation | `app/schemas/` |
-| Helper function | `app/utils/` |
-| Configuration | `app/core/config.py` |
-| Security code | `app/core/security.py` |
-| Tests | `backend/tests/` |
+### Understanding Code
+1. **Start with schemas** (app/schemas/) → See what API accepts/returns
+2. **Then check endpoint** (app/api/) → See how it processes requests
+3. **Then check service** (app/services/) → See business logic
+4. **Then check model** (app/models/) → See database structure
 
----
-
-## 📚 Learning Resources
-
-**Concepts to understand**:
-- **MVC Pattern**: Models (data) → Services (logic) → Routes (presentation)
-- **Dependency Injection**: FastAPI's `Depends()` for database sessions, auth
-- **ORM**: SQLAlchemy translates Python ↔ SQL
-- **Pydantic**: Validates data automatically
-
-**Recommended reading**:
-- FastAPI docs: https://fastapi.tiangolo.com
-- SQLAlchemy docs: https://docs.sqlalchemy.org
-- Clean Architecture: https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html
+### Making Changes
+1. **Read relevant docs first** (CONTEXT.md, ARCHITECTURE_DIAGRAM.md)
+2. **Write test first** (tests/test_*.py)
+3. **Make small changes** (one feature at a time)
+4. **Test immediately** (`pytest`, manual testing)
+5. **Update docs** (if needed)
 
 ---
 
-**Last Updated**: December 13, 2025  
-**Maintained By**: Diego (AstraFin Developer)  
-**Questions?**: Add them to this doc as you learn!
+## 🎓 Learning Resources
+
+**Concepts:**
+- **MVC Pattern:** Models (data) → Services (logic) → Routes (presentation)
+- **Dependency Injection:** FastAPI's `Depends()` for database sessions, auth
+- **ORM:** SQLAlchemy translates Python ↔ SQL
+- **Pydantic:** Validates data automatically
+
+**Documentation:**
+- FastAPI: https://fastapi.tiangolo.com
+- SQLAlchemy: https://docs.sqlalchemy.org
+- Pydantic: https://docs.pydantic.dev
+- Next.js: https://nextjs.org/docs
+- Tailwind: https://tailwindcss.com/docs
+
+---
+
+## 📊 Project Status Summary
+
+| Category | Status | Files | Progress |
+|----------|--------|-------|----------|
+| **Database** | ✅ Complete | 4 tables | 100% |
+| **ORM Models** | ✅ Complete | 4 files | 100% |
+| **Schemas** | ✅ Complete | 4 files | 100% |
+| **Core** | ✅ Complete | 3 files | 100% |
+| **Parser** | ✅ Complete | 1 file | 100% |
+| **Services** | ⏳ Pending | 0/3 files | 0% |
+| **API Endpoints** | ⏳ Pending | 0/4 files | 0% |
+| **Frontend** | ⏳ Not Started | 0 files | 0% |
+
+**Overall Backend:** 85% complete (21 hours invested)
+**Remaining to MVP:** 45 hours (11 backend + 30 frontend + 4 deploy)
+
+---
+
+**Last Updated:** December 20, 2025, 23:00 CST
+**Maintained By:** Diego
+**Questions?** Add them to this doc as you learn!

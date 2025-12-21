@@ -151,6 +151,7 @@ def parse_transaction_line(line):
         'description': description,
         'amount_abs': amount_abs,
         'movement_type': None,
+        'needs_review': True,  # Default to True, will be updated by determine_transaction_type()
         'saldo_operacion': saldo_operacion,
         'saldo_liquidacion': saldo_liquidacion
     }
