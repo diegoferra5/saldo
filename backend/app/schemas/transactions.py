@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, model_validator
-from datetime import date, datetime
+from datetime import DateType, datetime
 from typing import Optional
 from uuid import UUID
 from decimal import Decimal
@@ -24,7 +24,7 @@ class TransactionResponse(BaseModel):
     # Dates
     date: str  # "11/NOV" - formato original del PDF
     date_liquidacion: Optional[str] = None  # "11/NOV" o None
-    transaction_date: date  # 2025-11-11 - fecha parseada completa
+    transaction_date: DateType  # 2025-11-11 - fecha parseada completa
 
     # Transaction details
     description: str
