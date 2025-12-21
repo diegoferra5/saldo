@@ -14,6 +14,9 @@ from sqlalchemy.exc import IntegrityError
 from app.models.statement import Statement
 from app.models.account import Account
 
+from app.services.account_service import get_or_create_account
+
+
 from app.utils.pdf_parser import (
     extract_transaction_lines,
     parse_transaction_line,
@@ -215,29 +218,20 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         summary = extract_statement_summary(pdf_path)
         determine_transaction_type(parsed, summary)
 
-        # Ensure Account exists (Statement has no account_id in current schema)
-        account_type = (statement.account_type or "").upper().strip()
-        bank_name = (statement.bank_name or "").strip()
-
-        account = (
-            db.query(Account)
-            .filter(
-                Account.user_id == statement.user_id,
-                Account.bank_name == bank_name,
-                Account.account_type == account_type,
-            )
-            .first()
+       # Ensure Account exists (get or create)
+        account = get_or_create_account(
+            db=db,
+            user_id=statement.user_id,
+            bank_name=statement.bank_name,
+            account_type=statement.account_type,
         )
-        if not account:
-            account = Account(
-                user_id=statement.user_id,
-                bank_name=bank_name,
-                account_type=account_type,
-            )
-            db.add(account)
-            db.flush()  # ✅ now account.id exists
 
-        # ✅ always link statement to account (existing or new)
+        # Link statement to account
+        statement.account_id = account.id
+        db.flush()
+
+
+        # always link statement to account (existing or new)
         statement.account_id = account.id
         db.flush()
 

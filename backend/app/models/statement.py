@@ -28,7 +28,7 @@ class Statement(Base):
     
     # File info
     bank_name = Column(String(50), nullable=False)
-    account_type = Column(String(20), nullable=False, default="debit", server_default="debit")
+    account_type = Column(String(20), nullable=False, default="DEBIT", server_default="DEBIT")
     statement_month = Column(Date, nullable=False)
     period_start = Column(Date, nullable=True)
     period_end = Column(Date, nullable=True)

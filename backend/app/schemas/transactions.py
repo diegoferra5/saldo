@@ -75,7 +75,7 @@ class TransactionList(BaseModel):
     """Summarized transaction data for lists (output)"""
     id: UUID
     account_id: UUID
-    transaction_date: date
+    transaction_date: DateType
     description: str
     amount_abs: Decimal
     amount: Optional[Decimal] = None
