@@ -1,3 +1,4 @@
+"""Transaction hashing utilities for deduplication."""
 import hashlib
 from uuid import UUID
 from datetime import date
@@ -14,113 +15,59 @@ def compute_transaction_hash(
     """
     Compute SHA256 hash for transaction deduplication.
 
-    The hash uniquely identifies a transaction using fields that should
-    never change. If a user uploads the same PDF twice, transactions
-    with identical hashes are considered duplicates and won't be re-inserted.
-
-    Hash includes:
-    - user_id: Ensures isolation between users
-    - account_id: Same transaction in different accounts = different hash
-    - transaction_date: Full date (not just DD/MMM from PDF)
-    - description: Transaction description
-    - amount_abs: Absolute amount (always positive)
-
-    Does NOT include:
-    - movement_type: Can be updated by user (UNKNOWN → CARGO)
-    - category: User can change categorization
-    - needs_review: Can be toggled
-    - balances: Can vary if user uploads overlapping statements
-
-    Args:
-        user_id: UUID of the user who owns this transaction
-        account_id: UUID of the account this transaction belongs to
-        transaction_date: Full transaction date (not DD/MMM format)
-        description: Transaction description from PDF
-        amount_abs: Absolute transaction amount (always positive)
+    Hash includes stable identifiers only:
+    - user_id
+    - account_id
+    - transaction_date (full date)
+    - description (normalized)
+    - amount_abs (normalized to 2 decimals)
 
     Returns:
-        64-character hex string (SHA256 hash)
-
-    Examples:
-        >>> from uuid import UUID
-        >>> from datetime import date
-        >>> user_id = UUID('123e4567-e89b-12d3-a456-426614174000')
-        >>> account_id = UUID('123e4567-e89b-12d3-a456-426614174001')
-        >>> hash1 = compute_transaction_hash(
-        ...     user_id, account_id, date(2025, 11, 11),
-        ...     'STARBUCKS COFFEE', 150.00
-        ... )
-        >>> len(hash1)
-        64
-
-        >>> # Same transaction → same hash
-        >>> hash2 = compute_transaction_hash(
-        ...     user_id, account_id, date(2025, 11, 11),
-        ...     'STARBUCKS COFFEE', 150.00
-        ... )
-        >>> hash1 == hash2
-        True
-
-        >>> # Different amount → different hash
-        >>> hash3 = compute_transaction_hash(
-        ...     user_id, account_id, date(2025, 11, 11),
-        ...     'STARBUCKS COFFEE', 200.00
-        ... )
-        >>> hash1 != hash3
-        True
+        64-character hex string (SHA256)
     """
-    # Normalize amount to 2 decimal places (avoid float precision issues)
+    if not user_id or not account_id:
+        raise ValueError("user_id and account_id are required")
+    if not isinstance(transaction_date, date):
+        raise ValueError(f"transaction_date must be a date, got: {type(transaction_date)}")
+    if description is None:
+        description = ""
+
+    # Normalize description (avoid hash differences from case/whitespace)
+    description_norm = description.strip().upper()
+
+    # Normalize amount to 2 decimals (avoid float/Decimal formatting differences)
     if isinstance(amount_abs, Decimal):
-        amount_str = str(amount_abs)
+        amount_str = f"{amount_abs.quantize(Decimal('0.00'))}"
     else:
         amount_str = f"{float(amount_abs):.2f}"
 
-    # Build hash input string
-    # Format: user_id:account_id:YYYY-MM-DD:description:amount
+    # Build deterministic string representation
+    # Format: user_id:account_id:YYYY-MM-DD:DESCRIPTION:amount
     hash_input = (
-        f"{str(user_id)}:"
-        f"{str(account_id)}:"
+        f"{user_id}:"
+        f"{account_id}:"
         f"{transaction_date.isoformat()}:"
-        f"{description}:"
+        f"{description_norm}:"
         f"{amount_str}"
     )
 
-    # Compute SHA256 hash
-    hash_bytes = hashlib.sha256(hash_input.encode('utf-8')).digest()
-
-    # Return as hex string
-    return hash_bytes.hex()
+    return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
 
 def validate_hash_format(transaction_hash: str) -> bool:
     """
-    Validate that a hash string is in correct format.
-
-    Args:
-        transaction_hash: Hash string to validate
+    Validate that a hash string is in correct SHA256 hex format.
 
     Returns:
-        True if valid SHA256 hex string, False otherwise
-
-    Examples:
-        >>> validate_hash_format('a' * 64)
-        True
-
-        >>> validate_hash_format('not_a_hash')
-        False
-
-        >>> validate_hash_format('a' * 63)  # Too short
-        False
+        True if valid SHA256 hex string (64 chars), False otherwise
     """
     if not isinstance(transaction_hash, str):
         return False
-
     if len(transaction_hash) != 64:
         return False
-
-    # Check if all characters are valid hex
     try:
         int(transaction_hash, 16)
         return True
     except ValueError:
         return False
+
