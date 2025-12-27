@@ -108,4 +108,3 @@ def validate_transaction_date(transaction_date: date, statement_month: date) -> 
 
     return month_diff <= 2
 
-
