@@ -329,17 +329,19 @@ def determine_transaction_type(
     """
     # 1. initialize
     previous_balance = summary["starting_balance"]
-        
-    # keywords
+
+    # keywords (expanded for better coverage)
     ABONO_KEYWORDS = [
         "SPEI RECIBIDO",
         "DEPOSITO",
+        "DEPOSITO DE TERCERO",
         "ABONO",
         "REEMBOLSO",
         "DEVOLUC",
         "INTERESES",
         "BECAS",
-        "BECA"
+        "BECA",
+        "PAGO BECAS"
     ]
 
     CARGO_KEYWORDS = [
@@ -347,10 +349,24 @@ def determine_transaction_type(
         "RETIRO CAJERO",
         "RETIRO CAJERO AUTOMATICO",
         "PAGO TARJETA DE CREDITO",
+        "PAGO CUENTA DE TERCERO",
         "COMISION",
         "IVA",
-        "EFECTIVO SEGURO"
+        "EFECTIVO SEGURO",
+        "ATT"
     ]
+
+    # Helper function to normalize description for classification
+    def normalize_for_classification(desc: str) -> str:
+        """Normalize description text for more robust keyword matching."""
+        # Convert to uppercase
+        norm = desc.upper()
+        # Fix stuck words: RECIBIDO/ENVIADO followed immediately by letters
+        norm = re.sub(r'(RECIBIDO)([A-Z]+)', r'\1 \2', norm)
+        norm = re.sub(r'(ENVIADO)([A-Z]+)', r'\1 \2', norm)
+        # Collapse multiple spaces to single space
+        norm = re.sub(r'\s+', ' ', norm)
+        return norm.strip()
 
     # 2. classify each transaction
     for transaction in transactions:
@@ -399,14 +415,14 @@ def determine_transaction_type(
                             print("cargo case a igual (saldo_operacion)")
                 else:
                     # Can't use saldo_operacion - fall back to keywords
-                    description_upper = description.upper()
-                    
+                    description_norm = normalize_for_classification(description)
+
                     is_abono = False
                     for keyword in ABONO_KEYWORDS:
-                        if keyword in description_upper:
+                        if keyword in description_norm:
                             is_abono = True
                             break
-                    
+
                     if is_abono:
                         transaction["movement_type"] = "ABONO"
                         transaction["amount"] = amount_abs
@@ -416,7 +432,7 @@ def determine_transaction_type(
                         # Check CARGO keywords
                         is_cargo = False
                         for keyword in CARGO_KEYWORDS:
-                            if keyword in description_upper:
+                            if keyword in description_norm:
                                 is_cargo = True
                                 break
 
@@ -437,16 +453,16 @@ def determine_transaction_type(
                     
         # case B: No balance (use keywords)
         else:
-            # convert description to uppercase for comparison
-            description_upper = description.upper()
+            # normalize description for classification
+            description_norm = normalize_for_classification(description)
 
             # check abono keywords first
             is_abono = False
             for keyword in ABONO_KEYWORDS:
-                if keyword in description_upper:
+                if keyword in description_norm:
                     is_abono = True
                     break
-            
+
             if is_abono:
                 transaction["movement_type"] = "ABONO"
                 transaction["amount"] = amount_abs
@@ -456,7 +472,7 @@ def determine_transaction_type(
                 # Check CARGO keywords
                 is_cargo = False
                 for keyword in CARGO_KEYWORDS:
-                    if keyword in description_upper:
+                    if keyword in description_norm:
                         is_cargo = True
                         break
 
@@ -529,6 +545,16 @@ def determine_transaction_type(
         expected_unknown = missing_abonos + missing_cargos
         if count_unknown != expected_unknown:
             print(f"WARNING: Unknown count ({count_unknown}) doesn't match expected missing ({expected_unknown})")
+
+        # Show UNKNOWN transaction descriptions for debugging
+        if count_unknown > 0:
+            print(f"\n{'='*70}")
+            print(f"UNKNOWN TRANSACTION DESCRIPTIONS ({count_unknown} total)")
+            print(f"{'='*70}")
+            for i, t in enumerate(transactions, 1):
+                if t.get('movement_type') == 'UNKNOWN':
+                    print(f"{i}. {t['date']} | {t['description']}")
+            print(f"{'='*70}\n")
 
     return transactions
 
@@ -618,6 +644,10 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
                 summary,
                 debug=debug
             )
+            # Count transactions needing manual review
+            unknown_count = sum(1 for t in parsed_transactions if t.get('movement_type') == 'UNKNOWN')
+            if unknown_count > 0:
+                warnings.append(f"{unknown_count} transactions need manual review (movement_type=UNKNOWN)")
         except Exception as e:
             warnings.append(f"Transaction classification failed: {str(e)}")
     elif not summary:
@@ -649,55 +679,19 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         pdf_path = sys.argv[1]
 
-    print(f"\n{'='*70}")
-    print(f"BBVA DEBIT STATEMENT PARSER - SMOKE TEST")
-    print(f"{'='*70}")
-    print(f"PDF: {pdf_path}")
-    print(f"{'='*70}\n")
-
     # Run the parser
-    result = parse_bbva_debit_statement(pdf_path, debug=False)
+    result = parse_bbva_debit_statement(pdf_path, debug=True)
 
-    # Display results
-    print(f"{'='*70}")
-    print(f"RESULTS")
-    print(f"{'='*70}")
-    print(f"Transactions found: {len(result['transactions'])}")
+    # Display minimal results
+    print(f"Transactions: {len(result['transactions'])}")
     print(f"Warnings: {len(result['warnings'])}")
 
-    if result['warnings']:
-        print(f"\nWarning messages:")
-        for i, warning in enumerate(result['warnings'], 1):
-            print(f"  {i}. {warning}")
-
     if result['summary']:
-        print(f"\n{'='*70}")
-        print(f"SUMMARY TOTALS")
-        print(f"{'='*70}")
         summary = result['summary']
-        print(f"Starting balance:  ${summary['starting_balance']:>12,.2f}")
-        print(f"Deposits/Abonos:   ${summary['deposits_amount']:>12,.2f} ({summary.get('n_deposits', 0)} transactions)")
-        print(f"Charges/Cargos:    ${summary['charges_amount']:>12,.2f} ({summary.get('n_charges', 0)} transactions)")
-        print(f"Final balance:     ${summary['final_balance']:>12,.2f}")
+        print(f"Starting balance: {summary['starting_balance']:.2f}")
+        print(f"Deposits: {summary['deposits_amount']:.2f}")
+        print(f"Charges: {summary['charges_amount']:.2f}")
+        print(f"Final balance: {summary['final_balance']:.2f}")
     else:
-        print(f"\nNo summary available (check warnings)")
-
-    # Transaction breakdown by type
-    if result['transactions']:
-        abonos = sum(1 for t in result['transactions'] if t.get('movement_type') == 'ABONO')
-        cargos = sum(1 for t in result['transactions'] if t.get('movement_type') == 'CARGO')
-        unknown = sum(1 for t in result['transactions'] if t.get('movement_type') == 'UNKNOWN')
-        needs_review = sum(1 for t in result['transactions'] if t.get('needs_review'))
-
-        print(f"\n{'='*70}")
-        print(f"TRANSACTION CLASSIFICATION")
-        print(f"{'='*70}")
-        print(f"Abonos (income):   {abonos:>4}")
-        print(f"Cargos (expense):  {cargos:>4}")
-        print(f"Unknown:           {unknown:>4}")
-        print(f"Needs review:      {needs_review:>4}")
-
-    print(f"\n{'='*70}")
-    print(f"SMOKE TEST COMPLETE")
-    print(f"{'='*70}\n")
+        print("No summary available")
 
