@@ -693,6 +693,94 @@ def determine_transaction_type(
                 balance_for_logic -= amount_abs
             # If UNKNOWN, do NOT update balance_for_logic
 
+    # 2.5. SECOND PASS: Reconciliation-based UNKNOWN resolver
+    # Use effective balance anchors (same as classification) to auto-assign UNKNOWN signs
+    if debug:
+        print(f"\n{'='*70}")
+        print("SECOND PASS: RECONCILIATION-BASED UNKNOWN RESOLUTION")
+        print(f"{'='*70}")
+
+    def signed_amount_for_resolution(t: TransactionDict) -> Optional[float]:
+        """Return signed amount for ABONO/CARGO, None for UNKNOWN."""
+        mt = t.get("movement_type")
+        if mt == "ABONO":
+            return float(t["amount_abs"])
+        if mt == "CARGO":
+            return -float(t["amount_abs"])
+        return None  # UNKNOWN
+
+    def get_effective_balance_for_resolution(t: TransactionDict) -> Optional[float]:
+        """Get effective balance: saldo_operacion if available, else saldo_liquidacion."""
+        saldo_op = t.get("saldo_operacion")
+        saldo_liq = t.get("saldo_liquidacion")
+        return saldo_op if saldo_op is not None else saldo_liq
+
+    # Find anchors based on effective balance (same as classification used)
+    anchors_eff = [i for i, t in enumerate(transactions) if get_effective_balance_for_resolution(t) is not None]
+
+    if len(anchors_eff) > 0:
+        prev_anchor_idx = None
+        prev_anchor_balance = summary["starting_balance"]
+        resolved_count = 0
+
+        for anchor_idx in anchors_eff:
+            anchor_balance = float(get_effective_balance_for_resolution(transactions[anchor_idx]))
+
+            # Segment boundaries
+            start_idx = 0 if prev_anchor_idx is None else prev_anchor_idx + 1
+            end_idx = anchor_idx
+            seg = transactions[start_idx:end_idx + 1]
+
+            # Compute expected vs computed delta
+            expected_delta = anchor_balance - prev_anchor_balance
+            computed_delta = 0.0
+            unknowns_in_seg = []
+
+            for j, t in enumerate(seg, start=start_idx):
+                sa = signed_amount_for_resolution(t)
+                if sa is None:
+                    # This is UNKNOWN
+                    unknowns_in_seg.append(j)
+                else:
+                    computed_delta += sa
+
+            diff = round(expected_delta - computed_delta, 2)
+
+            # Try to resolve UNKNOWNs if diff matches total UNKNOWN amount
+            if diff != 0 and len(unknowns_in_seg) > 0:
+                unknown_sum = round(sum(transactions[idx]["amount_abs"] for idx in unknowns_in_seg), 2)
+
+                if debug:
+                    print(f"DEBUG Segment {start_idx + 1}-{end_idx + 1}: diff={diff:+.2f}, unknowns={len(unknowns_in_seg)}, sum={unknown_sum:.2f}")
+                    print(f"  Condition check: abs(abs({diff}) - {unknown_sum}) = {abs(abs(diff) - unknown_sum)} <= 0.01?")
+
+                # Check if diff can be explained by unknowns
+                if abs(abs(diff) - unknown_sum) <= 0.01:
+                    # All unknowns must share same sign
+                    sign_type = "ABONO" if diff > 0 else "CARGO"
+
+                    if debug:
+                        print(f"Segment {start_idx + 1}-{end_idx + 1}: diff={diff:+.2f}, unknown_sum={unknown_sum:.2f}")
+                        print(f"  Resolving {len(unknowns_in_seg)} UNKNOWN(s) as {sign_type}")
+
+                    for idx in unknowns_in_seg:
+                        t = transactions[idx]
+                        t["movement_type"] = sign_type
+                        t["amount"] = t["amount_abs"] if sign_type == "ABONO" else -t["amount_abs"]
+                        t["needs_review"] = False  # Auto-resolved via reconciliation
+                        resolved_count += 1
+
+                        if debug:
+                            print(f"    TX {idx + 1}: {t['description']} → {sign_type} ({t['amount']:+.2f})")
+
+            # Move anchor forward
+            prev_anchor_idx = anchor_idx
+            prev_anchor_balance = anchor_balance
+
+        if debug:
+            print(f"\nResolved {resolved_count} UNKNOWN transaction(s) via reconciliation")
+            print(f"{'='*70}\n")
+
     # 3. validation (skip UNKNOWN transactions)
     
     # calculate totals 
