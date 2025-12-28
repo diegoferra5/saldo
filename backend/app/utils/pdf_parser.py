@@ -493,7 +493,12 @@ def determine_transaction_type(
 
     # 2. classify each transaction
     for transaction in transactions:
-        current_balance = transaction["saldo_liquidacion"]
+        # Use saldo_operacion if available (immediate balance), else saldo_liquidacion (delayed settlement)
+        # This is the "effective balance" that shows the actual transaction impact
+        saldo_op = transaction.get("saldo_operacion")
+        saldo_liq = transaction.get("saldo_liquidacion")
+        current_balance = saldo_op if saldo_op is not None else saldo_liq
+
         amount_abs = transaction["amount_abs"]
         description = transaction["description"]
 
@@ -514,8 +519,12 @@ def determine_transaction_type(
             if debug:
                 print("abono hard override (SPEI RECIBIDO)")
             if current_balance is not None:
+                # Case A: update anchor
                 balance_for_logic = current_balance
                 previous_balance = current_balance
+            else:
+                # Case B: manually update balance_for_logic
+                balance_for_logic += amount_abs
             continue
 
         # SPEI ENVIADO - always outgoing transfer
@@ -525,8 +534,12 @@ def determine_transaction_type(
             if debug:
                 print("cargo hard override (SPEI ENVIADO)")
             if current_balance is not None:
+                # Case A: update anchor
                 balance_for_logic = current_balance
                 previous_balance = current_balance
+            else:
+                # Case B: manually update balance_for_logic
+                balance_for_logic -= amount_abs
             continue
 
         # case A: Has balance (more reliable)
@@ -672,6 +685,14 @@ def determine_transaction_type(
                         if debug:
                             print(f"unknown case b (no keywords) - Amount: {amount_abs}, Detail: {detail if detail else 'N/A'}")
 
+            # Case B: Manually update balance_for_logic based on classification
+            # This prevents drift when Case B transactions occur between Case A anchors
+            if transaction["movement_type"] == "ABONO":
+                balance_for_logic += amount_abs
+            elif transaction["movement_type"] == "CARGO":
+                balance_for_logic -= amount_abs
+            # If UNKNOWN, do NOT update balance_for_logic
+
     # 3. validation (skip UNKNOWN transactions)
     
     # calculate totals 
@@ -744,17 +765,23 @@ def determine_transaction_type(
                 return -float(t["amount_abs"])
             return None  # UNKNOWN or None
 
+        def get_effective_balance(t: TransactionDict) -> Optional[float]:
+            """Get the effective balance: saldo_operacion if available, else saldo_liquidacion."""
+            saldo_op = t.get("saldo_operacion")
+            saldo_liq = t.get("saldo_liquidacion")
+            return saldo_op if saldo_op is not None else saldo_liq
+
         print(f"\n{'='*70}")
         print("RECONCILIATION AUDIT (ANCHOR-BASED)")
         print(f"{'='*70}")
 
-        # Find anchors: indices where saldo_liquidacion exists
-        anchors = [i for i, t in enumerate(transactions) if t.get("saldo_liquidacion") is not None]
+        # Find anchors: indices where effective balance exists (saldo_operacion or saldo_liquidacion)
+        anchors = [i for i, t in enumerate(transactions) if get_effective_balance(t) is not None]
 
         print(f"Anchors found: {len(anchors)}")
 
         if len(anchors) == 0:
-            print("No anchors available (no saldo_liquidacion). Skipping audit.")
+            print("No anchors available (no effective balance). Skipping audit.")
         else:
             # Initial anchor balance is starting_balance, BEFORE first anchor we reconcile from starting_balance
             prev_anchor_idx = None
@@ -764,7 +791,7 @@ def determine_transaction_type(
 
             # We'll treat each anchor as the end of a segment.
             for anchor_pos, anchor_idx in enumerate(anchors):
-                anchor_balance = float(transactions[anchor_idx]["saldo_liquidacion"])
+                anchor_balance = float(get_effective_balance(transactions[anchor_idx]))
 
                 # Segment boundaries:
                 # from (prev_anchor_idx + 1) to anchor_idx inclusive
@@ -787,7 +814,7 @@ def determine_transaction_type(
                         continue
                     computed_delta += sa
 
-                    if t.get("saldo_liquidacion") is None:
+                    if get_effective_balance(t) is None:
                         no_balance_count += 1  # risk factor
 
                 expected_delta = anchor_balance - prev_anchor_balance
