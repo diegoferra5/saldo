@@ -1,12 +1,44 @@
 import pdfplumber
 import re
+from typing import Dict, List, Optional, TypedDict
 
 # Compile patterns once (performance + clarity)
 DATE_RE = re.compile(r'^\d{2}/[A-Z]{3}$')
 AMOUNT_RE = re.compile(r'^\d{1,3}(?:,\d{3})*\.\d{2}$')
 
 
-def extract_transaction_lines(pdf_path):
+# Type definitions for transaction structure
+class TransactionDict(TypedDict, total=False):
+    """Type definition for a parsed transaction dictionary."""
+    date: str
+    date_liquidacion: str
+    description: str
+    amount_abs: float
+    amount: Optional[float]
+    movement_type: Optional[str]
+    needs_review: bool
+    saldo_operacion: Optional[float]
+    saldo_liquidacion: Optional[float]
+
+
+class SummaryDict(TypedDict, total=False):
+    """Type definition for statement summary dictionary."""
+    starting_balance: float
+    deposits_amount: float
+    charges_amount: float
+    final_balance: float
+    n_deposits: int
+    n_charges: int
+
+
+class ParserResult(TypedDict):
+    """Type definition for the main parser result."""
+    transactions: List[TransactionDict]
+    warnings: List[str]
+    summary: Optional[SummaryDict]
+
+
+def extract_transaction_lines(pdf_path: str) -> List[str]:
     """
     Extract raw transaction lines from a BBVA bank statement PDF.
 
@@ -19,10 +51,10 @@ def extract_transaction_lines(pdf_path):
     and descriptions is intentionally handled in later processing steps.
 
     Args:
-        pdf_path (str): Path to the BBVA PDF statement.
+        pdf_path: Path to the BBVA PDF statement.
 
     Returns:
-        list[str]: Raw transaction lines in document order.
+        Raw transaction lines in document order.
     """
     transaction_lines = []
     inside_transactions = False
@@ -70,36 +102,41 @@ def extract_transaction_lines(pdf_path):
     return transaction_lines
 
 
-def parse_transaction_line(line):
+def parse_transaction_line(line: str, debug: bool = False) -> Optional[TransactionDict]:
     """
     Parse a single BBVA transaction line into structured data.
-    
+
     Strategy:
     - Amounts are ALWAYS at the end of the line
     - Parse from right to left to avoid false positives
     - Don't determine cargo/abono yet (requires context)
-    
+
     Args:
-        line (str): Raw transaction line
-        
+        line: Raw transaction line
+        debug: If True, print debug information during parsing
+
     Returns:
-        dict | None: Parsed transaction or None if invalid
+        Parsed transaction or None if invalid
     """
-    
-    print(f"\nParsing: {line}")
-    
+
+    if debug:
+        print(f"\nParsing: {line}")
+
     # Split by spaces
     tokens = line.strip().split()
-    print(f"Tokens: {tokens}")
-    
+    if debug:
+        print(f"Tokens: {tokens}")
+
     # Validate minimum length: date date description amount
     if len(tokens) < 4:
-        print("Not enough tokens")
+        if debug:
+            print("Not enough tokens")
         return None
-    
+
     # Validate first two tokens are dates
     if not (DATE_RE.fullmatch(tokens[0]) and DATE_RE.fullmatch(tokens[1])):
-        print("First two tokens are not dates")
+        if debug:
+            print("First two tokens are not dates")
         return None
     
     # Extract dates
@@ -126,9 +163,10 @@ def parse_transaction_line(line):
     
     # Validate we found amounts
     if len(amounts) == 0:
-        print("No amounts found")
+        if debug:
+            print("No amounts found")
         return None
-    
+
     # Structure based on amount count
     if len(amounts) == 3:
         # Full: [amount, saldo_operacion, saldo_liquidacion]
@@ -142,10 +180,11 @@ def parse_transaction_line(line):
         saldo_liquidacion = None
     else:
         # Unexpected - likely parsing error
-        print(f"Unexpected amount count: {len(amounts)}")
+        if debug:
+            print(f"Unexpected amount count: {len(amounts)}")
         return None
-    
-    result = {
+
+    result: TransactionDict = {
         'date': fecha_operacion,
         'date_liquidacion': fecha_liquidacion,
         'description': description,
@@ -155,18 +194,22 @@ def parse_transaction_line(line):
         'saldo_operacion': saldo_operacion,
         'saldo_liquidacion': saldo_liquidacion
     }
-    
-    print(f"Parsed successfully: {result}")
+
+    if debug:
+        print(f"Parsed successfully: {result}")
     return result
 
 
-def extract_statement_summary(pdf_path):
+def extract_statement_summary(pdf_path: str) -> SummaryDict:
     """
     Extracts the financial summary from a BBVA bank statement.
-    
+
+    Args:
+        pdf_path: Path to the BBVA PDF statement.
+
     Returns:
-        dict: Summary with starting_balance, deposits_amount, charges_amount, etc.
-    
+        Summary with starting_balance, deposits_amount, charges_amount, etc.
+
     Raises:
         FileNotFoundError: If the PDF doesn't exist
         ValueError: If information is missing or mathematical validation fails
@@ -265,11 +308,24 @@ def extract_statement_summary(pdf_path):
     return summary
 
 
-def determine_transaction_type(transactions, summary):
+def determine_transaction_type(
+    transactions: List[TransactionDict],
+    summary: SummaryDict,
+    debug: bool = False
+) -> List[TransactionDict]:
     """
     Classify each transaction as CARGO, ABONO, or UNKNOWN.
-    
-    UNKNOWN transactions require manual user review.
+
+    Args:
+        transactions: List of parsed transactions to classify
+        summary: Statement summary with totals for validation
+        debug: If True, print debug information during classification
+
+    Returns:
+        The same transactions list with movement_type and amount fields populated
+
+    Note:
+        UNKNOWN transactions require manual user review.
     """
     # 1. initialize
     previous_balance = summary["starting_balance"]
@@ -313,13 +369,15 @@ def determine_transaction_type(transactions, summary):
                 # balance went up: income
                 transaction["movement_type"] = "ABONO"
                 transaction["amount"] = amount_abs
-                print("abono case a")
+                if debug:
+                    print("abono case a")
 
             elif current_balance < previous_balance:
                 # balance went down: expense
                 transaction["movement_type"] = "CARGO"
                 transaction["amount"] = -amount_abs
-                print("cargo case a")
+                if debug:
+                    print("cargo case a")
             
             else:
                 # current balance == previous balance (rare edge case)
@@ -332,11 +390,13 @@ def determine_transaction_type(transactions, summary):
                     if saldo_op > previous_balance:
                         transaction["movement_type"] = "ABONO"
                         transaction["amount"] = amount_abs
-                        print("abono case a igual (saldo_operacion)")
+                        if debug:
+                            print("abono case a igual (saldo_operacion)")
                     else:  # saldo_op < previous_balance
                         transaction["movement_type"] = "CARGO"
                         transaction["amount"] = -amount_abs
-                        print("cargo case a igual (saldo_operacion)")
+                        if debug:
+                            print("cargo case a igual (saldo_operacion)")
                 else:
                     # Can't use saldo_operacion - fall back to keywords
                     description_upper = description.upper()
@@ -350,7 +410,8 @@ def determine_transaction_type(transactions, summary):
                     if is_abono:
                         transaction["movement_type"] = "ABONO"
                         transaction["amount"] = amount_abs
-                        print("abono case a igual (keywords)")
+                        if debug:
+                            print("abono case a igual (keywords)")
                     else:
                         # Check CARGO keywords
                         is_cargo = False
@@ -358,17 +419,19 @@ def determine_transaction_type(transactions, summary):
                             if keyword in description_upper:
                                 is_cargo = True
                                 break
-                        
+
                         if is_cargo:
                             transaction["movement_type"] = "CARGO"
                             transaction["amount"] = -amount_abs
-                            print("cargo case a igual (keywords)")
+                            if debug:
+                                print("cargo case a igual (keywords)")
                         else:
                             # ✅ UNKNOWN - user must decide
                             transaction["movement_type"] = "UNKNOWN"
                             transaction["amount"] = None
                             transaction["needs_review"] = True
-                            print("unknown case a igual (no keywords)")
+                            if debug:
+                                print("unknown case a igual (no keywords)")
 
             previous_balance = current_balance
                     
@@ -387,7 +450,8 @@ def determine_transaction_type(transactions, summary):
             if is_abono:
                 transaction["movement_type"] = "ABONO"
                 transaction["amount"] = amount_abs
-                print("abono case b")
+                if debug:
+                    print("abono case b")
             else:
                 # Check CARGO keywords
                 is_cargo = False
@@ -395,17 +459,19 @@ def determine_transaction_type(transactions, summary):
                     if keyword in description_upper:
                         is_cargo = True
                         break
-                
+
                 if is_cargo:
                     transaction["movement_type"] = "CARGO"
                     transaction["amount"] = -amount_abs
-                    print("cargo case b")
+                    if debug:
+                        print("cargo case b")
                 else:
                     # ✅ UNKNOWN - user must decide
                     transaction["movement_type"] = "UNKNOWN"
                     transaction["amount"] = None
                     transaction["needs_review"] = True
-                    print("unknown case b (no keywords)")
+                    if debug:
+                        print("unknown case b (no keywords)")
 
     # 3. validation (skip UNKNOWN transactions)
     
@@ -433,90 +499,205 @@ def determine_transaction_type(transactions, summary):
     expected_count_cargos = summary["n_charges"]
 
     # Report classification results
-    print(f"\n{'='*70}")
-    print("CLASSIFICATION SUMMARY")
-    print(f"{'='*70}")
-    print(f"✅ Abonos classified: {count_abonos}")
-    print(f"✅ Cargos classified: {count_cargos}")
-    print(f"⚠️  Unknown (need review): {count_unknown}")
-    print(f"{'='*70}\n")
+    if debug:
+        print(f"\n{'='*70}")
+        print("CLASSIFICATION SUMMARY")
+        print(f"{'='*70}")
+        print(f"✅ Abonos classified: {count_abonos}")
+        print(f"✅ Cargos classified: {count_cargos}")
+        print(f"⚠️  Unknown (need review): {count_unknown}")
+        print(f"{'='*70}\n")
 
-    # validate amounts (only for classified transactions)
-    if abs(total_abonos - expected_abonos) > 0.1:
-        print(f"WARNING: Abonos total mismatch: calculated {total_abonos:.2f}, expected {expected_abonos:.2f}")
+        # validate amounts (only for classified transactions)
+        if abs(total_abonos - expected_abonos) > 0.1:
+            print(f"WARNING: Abonos total mismatch: calculated {total_abonos:.2f}, expected {expected_abonos:.2f}")
 
-    if abs(total_cargos - expected_cargos) > 0.1:
-        print(f"WARNING: Cargos total mismatch: calculated {total_cargos:.2f}, expected {expected_cargos:.2f}")
+        if abs(total_cargos - expected_cargos) > 0.1:
+            print(f"WARNING: Cargos total mismatch: calculated {total_cargos:.2f}, expected {expected_cargos:.2f}")
 
-    # Note: counts won't match if there are UNKNOWN transactions
-    missing_abonos = expected_count_abonos - count_abonos
-    missing_cargos = expected_count_cargos - count_cargos
-    
-    if missing_abonos > 0:
-        print(f"INFO: {missing_abonos} abonos pending classification (likely in UNKNOWN)")
-    
-    if missing_cargos > 0:
-        print(f"INFO: {missing_cargos} cargos pending classification (likely in UNKNOWN)")
-    
-    # Check if UNKNOWN count matches expected missing
-    expected_unknown = missing_abonos + missing_cargos
-    if count_unknown != expected_unknown:
-        print(f"WARNING: Unknown count ({count_unknown}) doesn't match expected missing ({expected_unknown})")
+        # Note: counts won't match if there are UNKNOWN transactions
+        missing_abonos = expected_count_abonos - count_abonos
+        missing_cargos = expected_count_cargos - count_cargos
+
+        if missing_abonos > 0:
+            print(f"INFO: {missing_abonos} abonos pending classification (likely in UNKNOWN)")
+
+        if missing_cargos > 0:
+            print(f"INFO: {missing_cargos} cargos pending classification (likely in UNKNOWN)")
+
+        # Check if UNKNOWN count matches expected missing
+        expected_unknown = missing_abonos + missing_cargos
+        if count_unknown != expected_unknown:
+            print(f"WARNING: Unknown count ({count_unknown}) doesn't match expected missing ({expected_unknown})")
 
     return transactions
 
 
-if __name__ == "__main__":
-    pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
-    pdf_path2023 = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_2023.pdf"
+def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResult:
+    """
+    Main public entry point for parsing a BBVA debit statement PDF.
 
-    # Extract raw lines
-    transaction_lines = extract_transaction_lines(pdf_path)
-    
-    print(f"\n{'='*70}")
-    print(f"FOUND {len(transaction_lines)} TRANSACTIONS")
-    print(f"{'='*70}\n")
-    
-    # Parse all transactions
-    parsed_transactions = []
-    for i, trans in enumerate(transaction_lines, 1):
-        print(f"\n{i:2d}. {trans}")
-        parsed = parse_transaction_line(trans)
+    This function orchestrates the complete parsing pipeline:
+    1. Extracts raw transaction lines from the PDF
+    2. Parses each line into structured data
+    3. Extracts the statement summary (totals, balances)
+    4. Classifies transactions as CARGO/ABONO/UNKNOWN
+
+    Args:
+        pdf_path: Path to the BBVA debit statement PDF file
+        debug: If True, print detailed debug information during parsing
+
+    Returns:
+        Dictionary with:
+            - transactions: List of parsed and classified transactions
+            - warnings: List of warning messages encountered during parsing
+            - summary: Statement summary with totals and balances (or None if extraction failed)
+
+    Example:
+        >>> result = parse_bbva_debit_statement("/path/to/statement.pdf")
+        >>> print(f"Found {len(result['transactions'])} transactions")
+        >>> print(f"Warnings: {len(result['warnings'])}")
+        >>> if result['summary']:
+        ...     print(f"Final balance: ${result['summary']['final_balance']:,.2f}")
+    """
+    warnings: List[str] = []
+
+    # Step 1: Extract raw transaction lines
+    try:
+        transaction_lines = extract_transaction_lines(pdf_path)
+        if debug:
+            print(f"\n{'='*70}")
+            print(f"FOUND {len(transaction_lines)} RAW TRANSACTION LINES")
+            print(f"{'='*70}\n")
+    except Exception as e:
+        warnings.append(f"Failed to extract transaction lines: {str(e)}")
+        return {
+            "transactions": [],
+            "warnings": warnings,
+            "summary": None
+        }
+
+    # Step 2: Parse each transaction line
+    parsed_transactions: List[TransactionDict] = []
+    failed_count = 0
+    for line in transaction_lines:
+        parsed = parse_transaction_line(line, debug=debug)
         if parsed:
             parsed_transactions.append(parsed)
-    
-    #shitty
-    print(f"{'='*70}\n")
-    print(parsed_transactions[0])
-    print(extract_statement_summary(pdf_path))
+        else:
+            failed_count += 1
+            if debug:
+                print(f"Failed to parse line: {line}")
+
+    if failed_count > 0:
+        warnings.append(f"Failed to parse {failed_count} transaction line(s)")
+
+    if debug:
+        print(f"\n{'='*70}")
+        print(f"SUCCESSFULLY PARSED: {len(parsed_transactions)}/{len(transaction_lines)}")
+        print(f"{'='*70}\n")
+
+    # Step 3: Extract statement summary
+    summary: Optional[SummaryDict] = None
+    try:
+        summary = extract_statement_summary(pdf_path)
+        if debug:
+            print(f"Summary extracted successfully: {summary}")
+    except ValueError as e:
+        warnings.append(f"Summary extraction issue: {str(e)}")
+        summary = None
+    except Exception as e:
+        warnings.append(f"Failed to extract summary: {str(e)}")
+        summary = None
+
+    # Step 4: Classify transactions (only if we have summary)
+    if summary and parsed_transactions:
+        try:
+            parsed_transactions = determine_transaction_type(
+                parsed_transactions,
+                summary,
+                debug=debug
+            )
+        except Exception as e:
+            warnings.append(f"Transaction classification failed: {str(e)}")
+    elif not summary:
+        warnings.append("Skipping transaction classification due to missing summary")
+
+    return {
+        "transactions": parsed_transactions,
+        "warnings": warnings,
+        "summary": summary
+    }
 
 
-    # Summary
+if __name__ == "__main__":
+    """
+    Smoke test runner for BBVA debit statement parser.
+
+    Usage:
+        python backend/app/utils/pdf_parser.py <path_to_pdf>
+
+    Or edit the pdf_path variable below and run:
+        python backend/app/utils/pdf_parser.py
+    """
+    import sys
+
+    # Default test PDF (edit this path for quick testing)
+    pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
+
+    # Allow CLI argument to override
+    if len(sys.argv) > 1:
+        pdf_path = sys.argv[1]
+
     print(f"\n{'='*70}")
-    print(f"SUCCESSFULLY PARSED: {len(parsed_transactions)}/{len(transaction_lines)}")
-    print(f"{'='*70}\n")
-
-    '''
-    # Show first 10 in clean format
-    print("\nFirst 10 transactions:")
-    for i, trans in enumerate(parsed_transactions[:10], 1):
-        balance = f"${trans['saldo_liquidacion']:,.2f}" if trans['saldo_liquidacion'] else "N/A"
-        print(f"{i}. {trans['date']} | {trans['description']:<35} | ${trans['amount_abs']:>10,.2f} | Balance: {balance:>12}")
-    
-    # Validation checks
-    print(f"\n{'='*70}")
-    print("VALIDATION CHECKS")
+    print(f"BBVA DEBIT STATEMENT PARSER - SMOKE TEST")
     print(f"{'='*70}")
-    
-    empty_descriptions = sum(1 for t in parsed_transactions if not t['description'])
-    complete_transactions = sum(1 for t in parsed_transactions if t['saldo_liquidacion'] is not None)
-    incomplete_transactions = sum(1 for t in parsed_transactions if t['saldo_liquidacion'] is None)
-    
-    print(f"Empty descriptions: {empty_descriptions}")
-    print(f"Complete transactions (with balance): {complete_transactions}")
-    print(f"Incomplete transactions (no balance): {incomplete_transactions}")
-    '''
+    print(f"PDF: {pdf_path}")
+    print(f"{'='*70}\n")
 
-    summary = extract_statement_summary(pdf_path)
-    determine_transaction_type(parsed_transactions, summary)
+    # Run the parser
+    result = parse_bbva_debit_statement(pdf_path, debug=False)
+
+    # Display results
+    print(f"{'='*70}")
+    print(f"RESULTS")
+    print(f"{'='*70}")
+    print(f"Transactions found: {len(result['transactions'])}")
+    print(f"Warnings: {len(result['warnings'])}")
+
+    if result['warnings']:
+        print(f"\nWarning messages:")
+        for i, warning in enumerate(result['warnings'], 1):
+            print(f"  {i}. {warning}")
+
+    if result['summary']:
+        print(f"\n{'='*70}")
+        print(f"SUMMARY TOTALS")
+        print(f"{'='*70}")
+        summary = result['summary']
+        print(f"Starting balance:  ${summary['starting_balance']:>12,.2f}")
+        print(f"Deposits/Abonos:   ${summary['deposits_amount']:>12,.2f} ({summary.get('n_deposits', 0)} transactions)")
+        print(f"Charges/Cargos:    ${summary['charges_amount']:>12,.2f} ({summary.get('n_charges', 0)} transactions)")
+        print(f"Final balance:     ${summary['final_balance']:>12,.2f}")
+    else:
+        print(f"\nNo summary available (check warnings)")
+
+    # Transaction breakdown by type
+    if result['transactions']:
+        abonos = sum(1 for t in result['transactions'] if t.get('movement_type') == 'ABONO')
+        cargos = sum(1 for t in result['transactions'] if t.get('movement_type') == 'CARGO')
+        unknown = sum(1 for t in result['transactions'] if t.get('movement_type') == 'UNKNOWN')
+        needs_review = sum(1 for t in result['transactions'] if t.get('needs_review'))
+
+        print(f"\n{'='*70}")
+        print(f"TRANSACTION CLASSIFICATION")
+        print(f"{'='*70}")
+        print(f"Abonos (income):   {abonos:>4}")
+        print(f"Cargos (expense):  {cargos:>4}")
+        print(f"Unknown:           {unknown:>4}")
+        print(f"Needs review:      {needs_review:>4}")
+
+    print(f"\n{'='*70}")
+    print(f"SMOKE TEST COMPLETE")
+    print(f"{'='*70}\n")
 
