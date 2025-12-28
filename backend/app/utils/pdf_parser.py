@@ -817,10 +817,10 @@ def determine_transaction_type(
             print(f"{'='*70}\n")
 
     # 3. validation (skip UNKNOWN transactions)
-    
-    # calculate totals 
-    total_abonos = 0
-    total_cargos = 0
+
+    # calculate totals
+    total_abonos = 0.0
+    total_cargos = 0.0
     count_abonos = 0
     count_cargos = 0
     count_unknown = 0
@@ -1115,7 +1115,7 @@ if __name__ == "__main__":
     pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
     debug = False
 
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and sys.argv[1] != "--debug":
         pdf_path = sys.argv[1]
     if "--debug" in sys.argv:
         debug = True
