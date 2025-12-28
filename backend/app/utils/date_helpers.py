@@ -1,3 +1,4 @@
+"""Date parsing utilities for BBVA statements."""
 from datetime import date
 
 # Map Spanish month abbreviations to month numbers
@@ -43,16 +44,23 @@ def parse_bbva_date(date_str: str, statement_month: date) -> date:
     Raises:
         ValueError: If date_str format is invalid or month abbreviation unknown
     """
+    # Early validation
+    if not date_str or '/' not in date_str:
+        raise ValueError(f"Invalid date format: {date_str}")
+
     try:
-        # Parse date string
-        day_str, month_abbr = date_str.split('/')
+        # Normalize input (handle spaces and case)
+        date_str = date_str.strip()
+        day_str, month_abbr = [x.strip() for x in date_str.split('/', 1)]
+        month_abbr = month_abbr.upper()
+
+        # Parse day
         day = int(day_str)
 
         # Get month number from abbreviation
-        if month_abbr not in MONTH_MAP:
+        month = MONTH_MAP.get(month_abbr)
+        if not month:
             raise ValueError(f"Unknown month abbreviation: {month_abbr}")
-
-        month = MONTH_MAP[month_abbr]
 
         # Start with statement year
         year = statement_month.year
@@ -65,7 +73,7 @@ def parse_bbva_date(date_str: str, statement_month: date) -> date:
 
         return date(year, month, day)
 
-    except ValueError as e:
+    except Exception as e:
         raise ValueError(f"Invalid date format '{date_str}': {e}")
 
 
@@ -99,3 +107,4 @@ def validate_transaction_date(transaction_date: date, statement_month: date) -> 
     )
 
     return month_diff <= 2
+
