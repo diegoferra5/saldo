@@ -13,6 +13,7 @@ class TransactionDict(TypedDict, total=False):
     date: str
     date_liquidacion: str
     description: str
+    detail: Optional[str]  # Optional detail line for disambiguation
     amount_abs: float
     amount: Optional[float]
     movement_type: Optional[str]
@@ -38,7 +39,7 @@ class ParserResult(TypedDict):
     summary: Optional[SummaryDict]
 
 
-def extract_transaction_lines(pdf_path: str) -> List[str]:
+def extract_transaction_lines(pdf_path: str) -> List[Dict[str, Optional[str]]]:
     """
     Extract raw transaction lines from a BBVA bank statement PDF.
 
@@ -54,55 +55,84 @@ def extract_transaction_lines(pdf_path: str) -> List[str]:
         pdf_path: Path to the BBVA PDF statement.
 
     Returns:
-        Raw transaction lines in document order.
+        List of dicts with 'main_line' and optional 'detail_line' for context.
     """
     transaction_lines = []
     inside_transactions = False
     pattern = r'^\d{2}/[A-Z]{3}\s+\d{2}/[A-Z]{3}'
-    
+
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
-            
+
             if not text:
                 continue
-            
+
             lines = text.split('\n')
-            
-            for line in lines:
-                line_clean = line.rstrip()
+            i = 0
+
+            while i < len(lines):
+                line_clean = lines[i].rstrip()
                 line_lower = line_clean.lower()
-                
+
                 # Start of transactions
                 if "detalle de movimientos" in line_lower:
                     inside_transactions = True
+                    i += 1
                     continue
-                
+
                 # End of transactions
                 if inside_transactions and "total de movimientos" in line_lower:
                     inside_transactions = False
+                    i += 1
                     continue
-                
+
                 # Skip if not in transaction section
                 if not inside_transactions:
+                    i += 1
                     continue
-                
+
                 # Skip detail lines (start with space)
                 if line_clean.startswith(" "):
+                    i += 1
                     continue
-                
+
                 # Skip header lines
                 if "fecha" in line_lower or "oper" in line_lower:
+                    i += 1
                     continue
-                
+
                 # Real transaction (must match date pattern)
                 if re.match(pattern, line_clean):
-                    transaction_lines.append(line_clean)
-    
+                    # Capture optional detail line (immediate next non-empty line that's not a transaction)
+                    detail_line = None
+                    if i + 1 < len(lines):
+                        next_line = lines[i + 1].rstrip()
+                        next_line_lower = next_line.lower()
+
+                        # Check if next line is a valid detail line:
+                        # - Not empty
+                        # - Not another transaction (doesn't start with date pattern)
+                        # - Not a header/section marker
+                        if (next_line and
+                            not re.match(pattern, next_line) and
+                            "fecha" not in next_line_lower and
+                            "oper" not in next_line_lower and
+                            "detalle de movimientos" not in next_line_lower and
+                            "total de movimientos" not in next_line_lower):
+                            detail_line = next_line.strip()
+
+                    transaction_lines.append({
+                        'main_line': line_clean,
+                        'detail_line': detail_line
+                    })
+
+                i += 1
+
     return transaction_lines
 
 
-def parse_transaction_line(line: str, debug: bool = False) -> Optional[TransactionDict]:
+def parse_transaction_line(line: str, detail_line: Optional[str] = None, debug: bool = False) -> Optional[TransactionDict]:
     """
     Parse a single BBVA transaction line into structured data.
 
@@ -113,6 +143,7 @@ def parse_transaction_line(line: str, debug: bool = False) -> Optional[Transacti
 
     Args:
         line: Raw transaction line
+        detail_line: Optional detail line for disambiguation context
         debug: If True, print debug information during parsing
 
     Returns:
@@ -121,6 +152,8 @@ def parse_transaction_line(line: str, debug: bool = False) -> Optional[Transacti
 
     if debug:
         print(f"\nParsing: {line}")
+        if detail_line:
+            print(f"Detail: {detail_line}")
 
     # Split by spaces
     tokens = line.strip().split()
@@ -188,6 +221,7 @@ def parse_transaction_line(line: str, debug: bool = False) -> Optional[Transacti
         'date': fecha_operacion,
         'date_liquidacion': fecha_liquidacion,
         'description': description,
+        'detail': detail_line,
         'amount_abs': amount_abs,
         'movement_type': None,
         'needs_review': True,  # Default to True, will be updated by determine_transaction_type()
@@ -198,6 +232,50 @@ def parse_transaction_line(line: str, debug: bool = False) -> Optional[Transacti
     if debug:
         print(f"Parsed successfully: {result}")
     return result
+
+
+def extract_account_holder_key(pdf_path: str) -> Optional[str]:
+    """
+    Extract account holder name key from PDF header for disambiguation.
+
+    Scans first page for the account holder's full name (uppercase line).
+    Returns a compact key like "DIEGO F" for matching in detail lines.
+
+    Args:
+        pdf_path: Path to the BBVA PDF statement.
+
+    Returns:
+        Compact account holder key (first name + first initial of surname) or None.
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            if len(pdf.pages) == 0:
+                return None
+
+            # Check first page only
+            text = pdf.pages[0].extract_text()
+            if not text:
+                return None
+
+            lines = text.split('\n')
+            for line in lines[:20]:  # Only check first 20 lines
+                line_clean = line.strip()
+                # Look for uppercase name pattern (e.g., "DIEGO FERRA LOPEZ")
+                # Typically 2-4 uppercase words, at least 10 chars
+                if (len(line_clean) >= 10 and
+                    line_clean.isupper() and
+                    not any(x in line_clean for x in ['BBVA', 'CUENTA', 'PERIODO', 'SALDO', 'PAGINA']) and
+                    ' ' in line_clean):
+                    # Extract first name + first char of first surname
+                    parts = line_clean.split()
+                    if len(parts) >= 2:
+                        first_name = parts[0]
+                        surname_initial = parts[1][0] if len(parts[1]) > 0 else ''
+                        return f"{first_name} {surname_initial}"
+    except Exception:
+        pass
+
+    return None
 
 
 def extract_statement_summary(pdf_path: str) -> SummaryDict:
@@ -311,6 +389,7 @@ def extract_statement_summary(pdf_path: str) -> SummaryDict:
 def determine_transaction_type(
     transactions: List[TransactionDict],
     summary: SummaryDict,
+    account_holder_key: Optional[str] = None,
     debug: bool = False
 ) -> List[TransactionDict]:
     """
@@ -319,6 +398,7 @@ def determine_transaction_type(
     Args:
         transactions: List of parsed transactions to classify
         summary: Statement summary with totals for validation
+        account_holder_key: Optional account holder key for disambiguation (e.g., "DIEGO F")
         debug: If True, print debug information during classification
 
     Returns:
@@ -331,6 +411,7 @@ def determine_transaction_type(
     previous_balance = summary["starting_balance"]
 
     # keywords (expanded for better coverage)
+    # Note: "PAGO CUENTA DE TERCERO" removed from CARGO - it's ambiguous
     ABONO_KEYWORDS = [
         "SPEI RECIBIDO",
         "DEPOSITO",
@@ -349,11 +430,15 @@ def determine_transaction_type(
         "RETIRO CAJERO",
         "RETIRO CAJERO AUTOMATICO",
         "PAGO TARJETA DE CREDITO",
-        "PAGO CUENTA DE TERCERO",
         "COMISION",
         "IVA",
         "EFECTIVO SEGURO",
         "ATT"
+    ]
+
+    # Ambiguous keywords that need detail line context
+    AMBIGUOUS_KEYWORDS = [
+        "PAGO CUENTA DE TERCERO"
     ]
 
     # Helper function to normalize description for classification
@@ -367,6 +452,33 @@ def determine_transaction_type(
         # Collapse multiple spaces to single space
         norm = re.sub(r'\s+', ' ', norm)
         return norm.strip()
+
+    # Helper function to disambiguate using detail line
+    def disambiguate_with_detail(description: str, detail: Optional[str], holder_key: Optional[str]) -> Optional[str]:
+        """
+        Disambiguate ambiguous transactions using detail line context.
+
+        Returns: "ABONO", "CARGO", or None if can't disambiguate.
+        """
+        if not detail or not holder_key:
+            return None
+
+        desc_norm = normalize_for_classification(description)
+        detail_norm = normalize_for_classification(detail)
+
+        # Check if this is an ambiguous transfer
+        is_ambiguous = any(kw in desc_norm for kw in AMBIGUOUS_KEYWORDS)
+        if not is_ambiguous:
+            return None
+
+        # Check if detail shows transfer TO the account holder
+        # Pattern: "TRANSF A <NAME>" or similar
+        if "TRANSF A" in detail_norm and holder_key in detail_norm:
+            return "ABONO"  # Incoming transfer to account holder
+        elif "TRANSF A" in detail_norm:
+            return "CARGO"  # Outgoing transfer to someone else
+
+        return None
 
     # 2. classify each transaction
     for transaction in transactions:
@@ -451,43 +563,53 @@ def determine_transaction_type(
 
             previous_balance = current_balance
                     
-        # case B: No balance (use keywords)
+        # case B: No balance (use keywords + disambiguation)
         else:
-            # normalize description for classification
-            description_norm = normalize_for_classification(description)
+            # Try disambiguation first for ambiguous transfers
+            detail = transaction.get("detail")
+            disambiguated = disambiguate_with_detail(description, detail, account_holder_key)
 
-            # check abono keywords first
-            is_abono = False
-            for keyword in ABONO_KEYWORDS:
-                if keyword in description_norm:
-                    is_abono = True
-                    break
-
-            if is_abono:
-                transaction["movement_type"] = "ABONO"
-                transaction["amount"] = amount_abs
+            if disambiguated:
+                transaction["movement_type"] = disambiguated
+                transaction["amount"] = amount_abs if disambiguated == "ABONO" else -amount_abs
                 if debug:
-                    print("abono case b")
+                    print(f"{disambiguated.lower()} case b (disambiguated via detail)")
             else:
-                # Check CARGO keywords
-                is_cargo = False
-                for keyword in CARGO_KEYWORDS:
+                # normalize description for classification
+                description_norm = normalize_for_classification(description)
+
+                # check abono keywords first
+                is_abono = False
+                for keyword in ABONO_KEYWORDS:
                     if keyword in description_norm:
-                        is_cargo = True
+                        is_abono = True
                         break
 
-                if is_cargo:
-                    transaction["movement_type"] = "CARGO"
-                    transaction["amount"] = -amount_abs
+                if is_abono:
+                    transaction["movement_type"] = "ABONO"
+                    transaction["amount"] = amount_abs
                     if debug:
-                        print("cargo case b")
+                        print("abono case b")
                 else:
-                    # ✅ UNKNOWN - user must decide
-                    transaction["movement_type"] = "UNKNOWN"
-                    transaction["amount"] = None
-                    transaction["needs_review"] = True
-                    if debug:
-                        print("unknown case b (no keywords)")
+                    # Check CARGO keywords
+                    is_cargo = False
+                    for keyword in CARGO_KEYWORDS:
+                        if keyword in description_norm:
+                            is_cargo = True
+                            break
+
+                    if is_cargo:
+                        transaction["movement_type"] = "CARGO"
+                        transaction["amount"] = -amount_abs
+                        if debug:
+                            print("cargo case b")
+                    else:
+                        # ✅ UNKNOWN - user must decide
+                        transaction["movement_type"] = "UNKNOWN"
+                        transaction["amount"] = None
+                        transaction["needs_review"] = True
+                        if debug:
+                            print("unknown case b (no keywords)")
 
     # 3. validation (skip UNKNOWN transactions)
     
@@ -588,7 +710,16 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
     """
     warnings: List[str] = []
 
-    # Step 1: Extract raw transaction lines
+    # Step 0: Extract account holder key for disambiguation
+    account_holder_key = None
+    try:
+        account_holder_key = extract_account_holder_key(pdf_path)
+        if debug and account_holder_key:
+            print(f"Account holder key: {account_holder_key}")
+    except Exception:
+        pass  # Not critical, continue without it
+
+    # Step 1: Extract raw transaction lines with detail context
     try:
         transaction_lines = extract_transaction_lines(pdf_path)
         if debug:
@@ -603,17 +734,19 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
             "summary": None
         }
 
-    # Step 2: Parse each transaction line
+    # Step 2: Parse each transaction line with detail context
     parsed_transactions: List[TransactionDict] = []
     failed_count = 0
-    for line in transaction_lines:
-        parsed = parse_transaction_line(line, debug=debug)
+    for trans_data in transaction_lines:
+        main_line = trans_data['main_line']
+        detail_line = trans_data.get('detail_line')
+        parsed = parse_transaction_line(main_line, detail_line, debug=debug)
         if parsed:
             parsed_transactions.append(parsed)
         else:
             failed_count += 1
             if debug:
-                print(f"Failed to parse line: {line}")
+                print(f"Failed to parse line: {main_line}")
 
     if failed_count > 0:
         warnings.append(f"Failed to parse {failed_count} transaction line(s)")
@@ -642,6 +775,7 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
             parsed_transactions = determine_transaction_type(
                 parsed_transactions,
                 summary,
+                account_holder_key,
                 debug=debug
             )
             # Count transactions needing manual review
