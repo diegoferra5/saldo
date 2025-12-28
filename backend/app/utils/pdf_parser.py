@@ -395,6 +395,9 @@ def determine_transaction_type(
     """
     Classify each transaction as CARGO, ABONO, or UNKNOWN.
 
+    MVP LOCK: Logic intentionally stops here. UNKNOWN transactions are expected and handled in UI.
+    Do NOT add heuristics, new keywords, or improve accuracy beyond this implementation.
+
     Args:
         transactions: List of parsed transactions to classify
         summary: Statement summary with totals for validation
@@ -408,8 +411,7 @@ def determine_transaction_type(
         UNKNOWN transactions require manual user review.
     """
     # 1. initialize
-    previous_balance = summary["starting_balance"]
-    balance_for_logic = summary["starting_balance"]  # Separate tracker for balance-based classification
+    balance_for_logic = summary["starting_balance"]  # Tracker for balance-based classification
 
     # Compile transfer detection patterns once for performance
     TRANSFER_TO_PATTERN = re.compile(
@@ -519,11 +521,8 @@ def determine_transaction_type(
             if debug:
                 print("abono hard override (SPEI RECIBIDO)")
             if current_balance is not None:
-                # Case A: update anchor
                 balance_for_logic = current_balance
-                previous_balance = current_balance
             else:
-                # Case B: manually update balance_for_logic
                 balance_for_logic += amount_abs
             continue
 
@@ -534,15 +533,13 @@ def determine_transaction_type(
             if debug:
                 print("cargo hard override (SPEI ENVIADO)")
             if current_balance is not None:
-                # Case A: update anchor
                 balance_for_logic = current_balance
-                previous_balance = current_balance
             else:
-                # Case B: manually update balance_for_logic
                 balance_for_logic -= amount_abs
             continue
 
-        # case A: Has balance (more reliable)
+        # Case A: Transaction has balance anchor (saldo_operacion or saldo_liquidacion)
+        # This is the most reliable path - compare balance movement to determine type
         if current_balance is not None:
 
             # compare with balance_for_logic (updated only at saldo_liquidacion anchors)
@@ -594,10 +591,8 @@ def determine_transaction_type(
                             transaction["amount"] = amount_abs if disambiguated == "ABONO" else -amount_abs
                             if debug:
                                 print(f"{disambiguated.lower()} case a igual (disambiguated)")
-                            # IMPORTANT: como hay continue, actualiza aquí
                             if current_balance is not None:
                                 balance_for_logic = current_balance
-                                previous_balance = current_balance
                             continue
 
                     is_abono = False
@@ -625,7 +620,8 @@ def determine_transaction_type(
                             if debug:
                                 print("cargo case a igual (keywords)")
                         else:
-                            # ✅ UNKNOWN - user must decide
+                            # ✅ UNKNOWN - This is INTENTIONAL and will be resolved manually in UI
+                            # No keywords matched and balance is ambiguous (rare case)
                             transaction["movement_type"] = "UNKNOWN"
                             transaction["amount"] = None
                             transaction["needs_review"] = True
@@ -633,11 +629,11 @@ def determine_transaction_type(
                                 detail = transaction.get("detail")
                                 print(f"unknown case a igual (no keywords) - Amount: {amount_abs}, Detail: {detail if detail else 'N/A'}")
 
-            # Update balance_for_logic only when we have saldo_liquidacion
+            # Update balance_for_logic with current balance
             balance_for_logic = current_balance
-            previous_balance = current_balance
                     
-        # case B: No balance (use keywords + disambiguation)
+        # Case B: Transaction without balance anchor
+        # Rely on keywords and detail line disambiguation - less reliable but necessary
         else:
             # Try disambiguation first for ambiguous transfers
             detail = transaction.get("detail")
@@ -678,7 +674,8 @@ def determine_transaction_type(
                         if debug:
                             print("cargo case b")
                     else:
-                        # ✅ UNKNOWN - user must decide
+                        # ✅ UNKNOWN - This is INTENTIONAL and will be resolved manually in UI
+                        # No balance AND no keywords matched - expected for rare transaction types
                         transaction["movement_type"] = "UNKNOWN"
                         transaction["amount"] = None
                         transaction["needs_review"] = True
@@ -693,20 +690,14 @@ def determine_transaction_type(
                 balance_for_logic -= amount_abs
             # If UNKNOWN, do NOT update balance_for_logic
 
-    # 2.5. SECOND PASS: Reconciliation-based UNKNOWN resolver (SAFER)
+    # 2.5. SECOND PASS: Reconciliation-based UNKNOWN resolver (MVP - full-sum match only)
     TOL = 0.01
-    MAX_UNKNOWN_FOR_SUBSET = 10  # Avoid heavy DP for too many unknowns
 
-    def get_anchor_balance_effective(t: TransactionDict) -> Optional[float]:
-        """Effective balance (saldo_operacion priority) - DEFAULT for reconciliation."""
+    def get_anchor_balance(t: TransactionDict) -> Optional[float]:
+        """Get effective balance (saldo_operacion priority, fallback saldo_liquidacion)."""
         saldo_op = t.get("saldo_operacion")
         saldo_liq = t.get("saldo_liquidacion")
         return float(saldo_op) if saldo_op is not None else (float(saldo_liq) if saldo_liq is not None else None)
-
-    def get_anchor_balance_liquidation_only(t: TransactionDict) -> Optional[float]:
-        """Liquidation-only balance - FALLBACK for edge cases."""
-        saldo_liq = t.get("saldo_liquidacion")
-        return float(saldo_liq) if saldo_liq is not None else None
 
     def signed_amount_known(t: TransactionDict) -> Optional[float]:
         """Return signed amount for ABONO/CARGO, None for UNKNOWN."""
@@ -717,58 +708,17 @@ def determine_transaction_type(
             return -float(t["amount_abs"])
         return None
 
-    def subset_sum_unique(amounts_cents: List[int], target: int) -> Optional[List[int]]:
-        """Return indices of UNIQUE subset summing to target, None if ambiguous."""
-        from typing import Dict
-        dp: Dict[int, List[int]] = {0: []}
+    if debug:
+        print(f"\n{'='*70}")
+        print("SECOND PASS: RECONCILIATION-BASED UNKNOWN RESOLUTION")
+        print(f"{'='*70}")
 
-        for i, a in enumerate(amounts_cents):
-            current = list(dp.items())
-            for s, idxs in current:
-                ns = s + a
-                if ns > target:
-                    continue
-                if ns not in dp:
-                    dp[ns] = idxs + [i]
+    # Find anchors based on effective balance
+    anchors = [i for i, t in enumerate(transactions) if get_anchor_balance(t) is not None]
 
-        if target not in dp:
-            return None
-
-        def count_solutions(i: int, remaining: int) -> int:
-            if remaining == 0:
-                return 1
-            if i == len(amounts_cents) or remaining < 0:
-                return 0
-            c = count_solutions(i + 1, remaining - amounts_cents[i])
-            if c > 1:
-                return c
-            c += count_solutions(i + 1, remaining)
-            return c
-
-        if count_solutions(0, target) != 1:
-            return None
-        return dp[target]
-
-    def reconcile_unknowns_by_anchors(
-        transactions: List[TransactionDict],
-        starting_balance: float,
-        get_anchor_balance,
-        debug: bool = False
-    ) -> tuple[int, int]:
-        """
-        Reconcile UNKNOWNs using anchor-based segment reconciliation.
-
-        Returns:
-            (resolved_count, remaining_unknowns)
-        """
-        anchors = [i for i, t in enumerate(transactions) if get_anchor_balance(t) is not None]
-
-        if not anchors:
-            remaining = sum(1 for t in transactions if t.get("movement_type") == "UNKNOWN")
-            return 0, remaining
-
+    if anchors:
         prev_anchor_idx = None
-        prev_anchor_balance = float(starting_balance)
+        prev_anchor_balance = float(summary["starting_balance"])
         resolved_count = 0
 
         for anchor_idx in anchors:
@@ -794,10 +744,10 @@ def determine_transaction_type(
                 unk_sum = round(sum(transactions[k]["amount_abs"] for k in unknown_idxs), 2)
                 print(f"DEBUG Segment {start_idx+1}-{end_idx+1}: diff={diff:+.2f}, unknowns={len(unknown_idxs)}, unknown_sum={unk_sum:.2f}")
 
+            # Try full-sum match ONLY (MVP - no subset matching)
             if unknown_idxs and abs(diff) > TOL:
                 unknown_sum = round(sum(transactions[k]["amount_abs"] for k in unknown_idxs), 2)
 
-                # Try full-sum match
                 if abs(abs(diff) - unknown_sum) <= TOL:
                     sign_type = "ABONO" if diff > 0 else "CARGO"
                     for k in unknown_idxs:
@@ -808,118 +758,16 @@ def determine_transaction_type(
                         resolved_count += 1
                     if debug:
                         print(f"✓ Resolved ALL {len(unknown_idxs)} UNKNOWNs as {sign_type} (full-sum match)")
-                # Try subset match
-                elif len(unknown_idxs) <= MAX_UNKNOWN_FOR_SUBSET:
-                    target_cents = int(round(abs(diff) * 100))
-                    amounts_cents = [int(round(transactions[k]["amount_abs"] * 100)) for k in unknown_idxs]
-
-                    subset = subset_sum_unique(amounts_cents, target_cents)
-                    if subset is not None:
-                        sign_type = "ABONO" if diff > 0 else "CARGO"
-                        chosen = [unknown_idxs[i] for i in subset]
-
-                        for k in chosen:
-                            t = transactions[k]
-                            t["movement_type"] = sign_type
-                            t["amount"] = t["amount_abs"] if sign_type == "ABONO" else -t["amount_abs"]
-                            t["needs_review"] = False
-                            resolved_count += 1
-
-                        if debug:
-                            print(f"✓ Resolved SUBSET {len(chosen)}/{len(unknown_idxs)} UNKNOWNs as {sign_type} (unique subset match)")
-                    else:
-                        if debug:
-                            print("✗ No safe unique subset match. Leaving UNKNOWNs for manual review.")
                 else:
                     if debug:
-                        print(f"✗ Too many UNKNOWNs ({len(unknown_idxs)} > {MAX_UNKNOWN_FOR_SUBSET}). Leaving for manual review.")
+                        print(f"✗ No full-sum match. Leaving {len(unknown_idxs)} UNKNOWN(s) for manual review.")
 
             prev_anchor_idx = anchor_idx
             prev_anchor_balance = anchor_balance
 
-        remaining = sum(1 for t in transactions if t.get("movement_type") == "UNKNOWN")
-        return resolved_count, remaining
-
-    def compute_deltas(transactions: List[TransactionDict], summary: SummaryDict) -> tuple[float, float]:
-        """Compute deposits and charges deltas vs summary."""
-        total_abonos = sum(t["amount"] for t in transactions if t.get("movement_type") == "ABONO")
-        total_cargos = sum(abs(t["amount"]) for t in transactions if t.get("movement_type") == "CARGO")
-        deposits_delta = summary["deposits_amount"] - total_abonos
-        charges_delta = total_cargos - summary["charges_amount"]
-        return deposits_delta, charges_delta
-
-    def snapshot_state(transactions: List[TransactionDict]) -> List[tuple]:
-        """Lightweight snapshot of classification state."""
-        return [(t.get("movement_type"), t.get("amount"), t.get("needs_review")) for t in transactions]
-
-    def restore_state(transactions: List[TransactionDict], snapshot: List[tuple]) -> None:
-        """Restore classification state from snapshot."""
-        for t, (mt, amt, nr) in zip(transactions, snapshot):
-            t["movement_type"] = mt
-            t["amount"] = amt
-            t["needs_review"] = nr
-
-    if debug:
-        print(f"\n{'='*70}")
-        print("SECOND PASS: RECONCILIATION-BASED UNKNOWN RESOLUTION (SAFER)")
-        print(f"{'='*70}")
-
-    # DEFAULT: Reconcile with effective balance (saldo_operacion priority)
-    resolved_eff, remaining_eff = reconcile_unknowns_by_anchors(
-        transactions, summary["starting_balance"], get_anchor_balance_effective, debug
-    )
-
-    if debug:
-        print(f"\nResolved {resolved_eff} UNKNOWN(s) via effective balance reconciliation")
-        print(f"{'='*70}\n")
-
-    # 2.6. SAFE FALLBACK: Try liquidation-only anchors if reconciliation needs improvement
-    deposits_delta, charges_delta = compute_deltas(transactions, summary)
-    needs_fallback = (
-        remaining_eff > 0 or
-        abs(deposits_delta) > TOL or
-        abs(charges_delta) > TOL
-    )
-
-    if needs_fallback:
         if debug:
-            print(f"\n{'='*70}")
-            print("SAFE FALLBACK: Trying liquidation-only anchors")
-            print(f"{'='*70}")
-            print(f"Remaining UNKNOWNs: {remaining_eff}")
-            print(f"Deposits delta: {deposits_delta:+.2f}, Charges delta: {charges_delta:+.2f}")
-
-        # Snapshot current state (lightweight)
-        state_snapshot = snapshot_state(transactions)
-
-        # Try liquidation-only reconciliation
-        resolved_liq, remaining_liq = reconcile_unknowns_by_anchors(
-            transactions, summary["starting_balance"], get_anchor_balance_liquidation_only, debug
-        )
-
-        # Check if fallback improved
-        deposits_delta_liq, charges_delta_liq = compute_deltas(transactions, summary)
-        delta_sum_before = abs(deposits_delta) + abs(charges_delta)
-        delta_sum_after = abs(deposits_delta_liq) + abs(charges_delta_liq)
-
-        improved = (
-            remaining_liq < remaining_eff and
-            delta_sum_after <= delta_sum_before + TOL
-        )
-
-        if improved:
-            if debug:
-                print(f"✓ Fallback IMPROVED: UNKNOWNs {remaining_eff} -> {remaining_liq}")
-                print(f"✓ Delta sum: {delta_sum_before:.2f} -> {delta_sum_after:.2f}")
-                print(f"✓ Accepting liquidation-only results")
-                print(f"{'='*70}\n")
-        else:
-            # Revert to effective balance results
-            restore_state(transactions, state_snapshot)
-            if debug:
-                print(f"✗ Fallback did NOT improve (UNKNOWNs: {remaining_liq}, delta sum: {delta_sum_after:.2f})")
-                print(f"✗ Reverting to effective balance results")
-                print(f"{'='*70}\n")
+            print(f"\nResolved {resolved_count} UNKNOWN transaction(s) via reconciliation")
+            print(f"{'='*70}\n")
 
     # 3. validation (skip UNKNOWN transactions)
     
