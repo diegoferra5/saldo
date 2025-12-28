@@ -409,6 +409,7 @@ def determine_transaction_type(
     """
     # 1. initialize
     previous_balance = summary["starting_balance"]
+    balance_for_logic = summary["starting_balance"]  # Separate tracker for balance-based classification
 
     # Compile transfer detection patterns once for performance
     TRANSFER_TO_PATTERN = re.compile(
@@ -513,6 +514,7 @@ def determine_transaction_type(
             if debug:
                 print("abono hard override (SPEI RECIBIDO)")
             if current_balance is not None:
+                balance_for_logic = current_balance
                 previous_balance = current_balance
             continue
 
@@ -523,41 +525,42 @@ def determine_transaction_type(
             if debug:
                 print("cargo hard override (SPEI ENVIADO)")
             if current_balance is not None:
+                balance_for_logic = current_balance
                 previous_balance = current_balance
             continue
 
         # case A: Has balance (more reliable)
         if current_balance is not None:
 
-            # compare with previous balance
-            if current_balance > previous_balance:
+            # compare with balance_for_logic (updated only at saldo_liquidacion anchors)
+            if current_balance > balance_for_logic:
                 # balance went up: income
                 transaction["movement_type"] = "ABONO"
                 transaction["amount"] = amount_abs
                 if debug:
                     print("abono case a")
 
-            elif current_balance < previous_balance:
+            elif current_balance < balance_for_logic:
                 # balance went down: expense
                 transaction["movement_type"] = "CARGO"
                 transaction["amount"] = -amount_abs
                 if debug:
                     print("cargo case a")
-            
+
             else:
-                # current balance == previous balance (rare edge case)
+                # current balance == balance_for_logic (rare edge case)
                 # Try saldo_operacion first, then keywords
-                
+
                 saldo_op = transaction["saldo_operacion"]
-                
-                if saldo_op is not None and saldo_op != previous_balance:
+
+                if saldo_op is not None and saldo_op != balance_for_logic:
                     # Use saldo_operacion to determine type
-                    if saldo_op > previous_balance:
+                    if saldo_op > balance_for_logic:
                         transaction["movement_type"] = "ABONO"
                         transaction["amount"] = amount_abs
                         if debug:
                             print("abono case a igual (saldo_operacion)")
-                    else:  # saldo_op < previous_balance
+                    else:  # saldo_op < balance_for_logic
                         transaction["movement_type"] = "CARGO"
                         transaction["amount"] = -amount_abs
                         if debug:
@@ -578,7 +581,10 @@ def determine_transaction_type(
                             transaction["amount"] = amount_abs if disambiguated == "ABONO" else -amount_abs
                             if debug:
                                 print(f"{disambiguated.lower()} case a igual (disambiguated)")
-                            previous_balance = current_balance
+                            # IMPORTANT: como hay continue, actualiza aquí
+                            if current_balance is not None:
+                                balance_for_logic = current_balance
+                                previous_balance = current_balance
                             continue
 
                     is_abono = False
@@ -614,6 +620,8 @@ def determine_transaction_type(
                                 detail = transaction.get("detail")
                                 print(f"unknown case a igual (no keywords) - Amount: {amount_abs}, Detail: {detail if detail else 'N/A'}")
 
+            # Update balance_for_logic only when we have saldo_liquidacion
+            balance_for_logic = current_balance
             previous_balance = current_balance
                     
         # case B: No balance (use keywords + disambiguation)
