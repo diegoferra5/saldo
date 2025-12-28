@@ -5,7 +5,26 @@ from typing import Dict, List, Optional, TypedDict
 # Compile patterns once (performance + clarity)
 DATE_RE = re.compile(r'^\d{2}/[A-Z]{3}$')
 AMOUNT_RE = re.compile(r'^\d{1,3}(?:,\d{3})*\.\d{2}$')
+MONEY_RE = re.compile(r'(\d{1,3}(?:,\d{3})*\.\d{2})')
 
+def _extract_last_money(line: str) -> Optional[float]:
+    """Return the LAST money amount like 1,234.56 found in the line."""
+    matches = MONEY_RE.findall(line)
+    if not matches:
+        return None
+    return float(matches[-1].replace(",", ""))
+
+def _extract_count_and_last_money(line: str) -> tuple[Optional[int], Optional[float]]:
+    """
+    Extract count (int) and LAST money amount from summary lines.
+    Works well for BBVA lines like: 'Depósitos / Abonos 17 47,856.22'
+    """
+    # Count: first standalone integer
+    count_match = re.search(r'\b(\d+)\b', line)
+    count = int(count_match.group(1)) if count_match else None
+
+    amount = _extract_last_money(line)
+    return count, amount
 
 # Type definitions for transaction structure
 class TransactionDict(TypedDict, total=False):
@@ -280,29 +299,65 @@ def extract_account_holder_key(pdf_path: str) -> Optional[str]:
 
 def extract_statement_summary(pdf_path: str) -> SummaryDict:
     """
-    Extracts the financial summary from a BBVA bank statement.
+    Extract the financial summary section from a BBVA debit account statement PDF.
+
+    This function scans the PDF looking for the **"Comportamiento"** section and
+    extracts the high-level financial totals reported by the bank, including:
+
+    - Starting balance (saldo anterior)
+    - Total deposits and number of deposits
+    - Total charges and number of charges
+    - Final balance (saldo final)
+
+    The parser is intentionally defensive and resilient:
+    - It does NOT rely on fixed token positions.
+    - Monetary values are extracted using regex helpers.
+    - Missing or malformed sections result in explicit errors.
+
+    The function also performs a mathematical validation to ensure consistency:
+    starting_balance + deposits_amount - charges_amount == final_balance
+
+    This validation guarantees that the extracted summary matches the bank’s
+    reported totals and protects downstream logic from silent data corruption.
 
     Args:
-        pdf_path: Path to the BBVA PDF statement.
+        pdf_path (str):
+            Absolute or relative path to the BBVA debit statement PDF file.
 
     Returns:
-        Summary with starting_balance, deposits_amount, charges_amount, etc.
+        SummaryDict:
+            A dictionary containing:
+            - starting_balance (float)
+            - deposits_amount (float)
+            - charges_amount (float)
+            - final_balance (float)
+            - n_deposits (int, optional)
+            - n_charges (int, optional)
 
     Raises:
-        FileNotFoundError: If the PDF doesn't exist
-        ValueError: If information is missing or mathematical validation fails
-        Exception: Other parsing errors
+        FileNotFoundError:
+            If the PDF file does not exist or cannot be opened.
+
+        ValueError:
+            If required summary fields are missing or if the mathematical
+            validation of balances fails.
+
+        Exception:
+            For unexpected PDF parsing errors (e.g., corrupted file).
+
+    Notes:
+        - This function is **read-only** and has no side effects.
+        - It does not log or print anything; all failures are surfaced via exceptions.
+        - It is safe to call from FastAPI routes and background tasks.
     """
-    summary = {}
+    summary: SummaryDict = {}
     inside_summary = False
-    
-    # LEVEL 1: Main try-except for PDF errors
+
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
                 text = page.extract_text()
-
-                if not text: 
+                if not text:
                     continue
 
                 lines = text.split('\n')
@@ -317,62 +372,54 @@ def extract_statement_summary(pdf_path: str) -> SummaryDict:
                     if inside_summary and "saldo promedio mínimo mensual" in line_lower:
                         inside_summary = False
                         continue
-                             
+
                     if not inside_summary:
                         continue
 
                     if "saldo anterior" in line_lower:
-                        prev_balance = line_lower
-                        tokens = prev_balance.split() 
-                        prev_balance = float(tokens[5].strip().replace(",", ""))
-                        summary["starting_balance"] = prev_balance
+                        prev_balance = _extract_last_money(line_clean)
+                        if prev_balance is not None:
+                            summary["starting_balance"] = prev_balance
                         continue
-                        
+
                     if "depósitos / abonos" in line_lower:
-                        deposits = line_lower
-                        tokens = deposits.split()
-                        n_deposits = int(tokens[8].strip())
-                        deposits_amount = float(tokens[9].strip().replace(",",""))
-                        summary["n_deposits"] = n_deposits
-                        summary["deposits_amount"] = deposits_amount
+                        n_deposits, deposits_amount = _extract_count_and_last_money(line_clean)
+                        if n_deposits is not None and deposits_amount is not None:
+                            summary["n_deposits"] = n_deposits
+                            summary["deposits_amount"] = deposits_amount
                         continue
-                        
+
                     if "retiros / cargos" in line_lower:
-                        charges = line_lower
-                        tokens = charges.split()
-                        n_charges = int(tokens[9].strip())
-                        charges_amount = float(tokens[10].strip().replace(",",""))
-                        summary["n_charges"] = n_charges
-                        summary["charges_amount"] = charges_amount
+                        n_charges, charges_amount = _extract_count_and_last_money(line_clean)
+                        if n_charges is not None and charges_amount is not None:
+                            summary["n_charges"] = n_charges
+                            summary["charges_amount"] = charges_amount
                         continue
 
                     if "saldo final" in line_lower:
-                        final_balance = line_lower
-                        tokens = final_balance.split() 
-                        final_balance = float(tokens[6].strip().replace(",", ""))
-                        summary["final_balance"] = final_balance
+                        final_balance = _extract_last_money(line_clean)
+                        if final_balance is not None:
+                            summary["final_balance"] = final_balance
                         continue
-    
+
     except FileNotFoundError:
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
     except Exception as e:
         raise Exception(f"Error reading PDF: {str(e)}")
-    
-    # LEVEL 2: Validate that summary has all required keys
+
     required_keys = ["starting_balance", "deposits_amount", "charges_amount", "final_balance"]
     missing_keys = [key for key in required_keys if key not in summary]
-    
+
     if missing_keys:
         raise ValueError(
             f"Incomplete summary extracted. Missing fields: {', '.join(missing_keys)}. "
             f"The PDF may not have the 'Comportamiento' section or it's formatted differently."
         )
-    
-    # LEVEL 3: Mathematical validation
+
     try:
         calculated_final = summary["starting_balance"] + summary["deposits_amount"] - summary["charges_amount"]
         actual_final = summary["final_balance"]
-        
+
         if round(calculated_final, 2) != round(actual_final, 2):
             raise ValueError(
                 f"Summary validation failed! "
@@ -382,7 +429,7 @@ def extract_statement_summary(pdf_path: str) -> SummaryDict:
             )
     except KeyError as e:
         raise ValueError(f"Missing required field in summary: {str(e)}")
-    
+
     return summary
 
 
@@ -770,10 +817,10 @@ def determine_transaction_type(
             print(f"{'='*70}\n")
 
     # 3. validation (skip UNKNOWN transactions)
-    
-    # calculate totals 
-    total_abonos = 0
-    total_cargos = 0
+
+    # calculate totals
+    total_abonos = 0.0
+    total_cargos = 0.0
     count_abonos = 0
     count_cargos = 0
     count_unknown = 0
@@ -985,7 +1032,7 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
             print(f"FOUND {len(transaction_lines)} RAW TRANSACTION LINES")
             print(f"{'='*70}\n")
     except Exception as e:
-        warnings.append(f"Failed to extract transaction lines: {str(e)}")
+        warnings.append(f"Failed to extract transaction lines: {type(e).__name__}")
         return {
             "transactions": [],
             "warnings": warnings,
@@ -1024,7 +1071,7 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
         warnings.append(f"Summary extraction issue: {str(e)}")
         summary = None
     except Exception as e:
-        warnings.append(f"Failed to extract summary: {str(e)}")
+        warnings.append(f"Failed to extract summary: {type(e).__name__}")
         summary = None
 
     # Step 4: Classify transactions (only if we have summary)
@@ -1041,7 +1088,7 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
             if unknown_count > 0:
                 warnings.append(f"{unknown_count} transactions need manual review (movement_type=UNKNOWN)")
         except Exception as e:
-            warnings.append(f"Transaction classification failed: {str(e)}")
+            warnings.append(f"Transaction classification failed: {type(e).__name__}")
     elif not summary:
         warnings.append("Skipping transaction classification due to missing summary")
 
@@ -1066,24 +1113,23 @@ if __name__ == "__main__":
 
     # Default test PDF (edit this path for quick testing)
     pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
+    debug = False
 
-    # Allow CLI argument to override
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 1 and sys.argv[1] != "--debug":
         pdf_path = sys.argv[1]
+    if "--debug" in sys.argv:
+        debug = True
 
-    # Run the parser
-    result = parse_bbva_debit_statement(pdf_path, debug=True)
+    result = parse_bbva_debit_statement(pdf_path, debug=debug)
 
-    # Display minimal results
+    # Minimal CLI output always shown (verbose logs only under debug=True)
     print(f"Transactions: {len(result['transactions'])}")
     print(f"Warnings: {len(result['warnings'])}")
 
-    if result['summary']:
-        summary = result['summary']
-        print(f"Starting balance: {summary['starting_balance']:.2f}")
-        print(f"Deposits: {summary['deposits_amount']:.2f}")
-        print(f"Charges: {summary['charges_amount']:.2f}")
-        print(f"Final balance: {summary['final_balance']:.2f}")
-    else:
-        print("No summary available")
+    if result["summary"]:
+        s = result["summary"]
+        print(f"Starting balance: {s['starting_balance']:.2f}")
+        print(f"Deposits: {s['deposits_amount']:.2f}")
+        print(f"Charges: {s['charges_amount']:.2f}")
+        print(f"Final balance: {s['final_balance']:.2f}")
 
