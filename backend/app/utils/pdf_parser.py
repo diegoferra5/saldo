@@ -410,6 +410,12 @@ def determine_transaction_type(
     # 1. initialize
     previous_balance = summary["starting_balance"]
 
+    # Compile transfer detection patterns once for performance
+    TRANSFER_TO_PATTERN = re.compile(
+        r'\b(TRANSF(?:ERENCIA)?|TRASP(?:ASO)?)\s+A\b',
+        re.IGNORECASE
+    )
+
     # keywords (expanded for better coverage)
     # Note: "PAGO CUENTA DE TERCERO" removed from CARGO - it's ambiguous
     ABONO_KEYWORDS = [
@@ -449,6 +455,9 @@ def determine_transaction_type(
         # Fix stuck words: RECIBIDO/ENVIADO followed immediately by letters
         norm = re.sub(r'(RECIBIDO)([A-Z]+)', r'\1 \2', norm)
         norm = re.sub(r'(ENVIADO)([A-Z]+)', r'\1 \2', norm)
+        # Normalize transfer variations to standard form
+        norm = re.sub(r'\b(TRANSFERENCIA|TRANSF)\b', 'TRANSF', norm)
+        norm = re.sub(r'\b(TRASPASO|TRASP)\b', 'TRASP', norm)
         # Collapse multiple spaces to single space
         norm = re.sub(r'\s+', ' ', norm)
         return norm.strip()
@@ -471,12 +480,13 @@ def determine_transaction_type(
         if not is_ambiguous:
             return None
 
-        # Check if detail shows transfer TO the account holder
-        # Pattern: "TRANSF A <NAME>" or similar
-        if "TRANSF A" in detail_norm and holder_key in detail_norm:
-            return "ABONO"  # Incoming transfer to account holder
-        elif "TRANSF A" in detail_norm:
-            return "CARGO"  # Outgoing transfer to someone else
+        # Check if detail shows transfer TO the account holder using compiled regex
+        # Pattern: "TRANSF A", "TRANSFERENCIA A", "TRASP A", "TRASPASO A"
+        if TRANSFER_TO_PATTERN.search(detail_norm):
+            if holder_key in detail_norm:
+                return "ABONO"  # Incoming transfer to account holder
+            else:
+                return "CARGO"  # Outgoing transfer to someone else
 
         return None
 
@@ -526,8 +536,23 @@ def determine_transaction_type(
                         if debug:
                             print("cargo case a igual (saldo_operacion)")
                 else:
-                    # Can't use saldo_operacion - fall back to keywords
+                    # Can't use saldo_operacion - try disambiguation first, then fall back to keywords
                     description_norm = normalize_for_classification(description)
+
+                    # Check if this is an ambiguous transaction that can be disambiguated
+                    is_ambiguous = any(kw in description_norm for kw in AMBIGUOUS_KEYWORDS)
+                    detail = transaction.get("detail")
+
+                    if is_ambiguous:
+                        # Try disambiguation first for ambiguous keywords
+                        disambiguated = disambiguate_with_detail(description, detail, account_holder_key)
+                        if disambiguated:
+                            transaction["movement_type"] = disambiguated
+                            transaction["amount"] = amount_abs if disambiguated == "ABONO" else -amount_abs
+                            if debug:
+                                print(f"{disambiguated.lower()} case a igual (disambiguated)")
+                            previous_balance = current_balance
+                            continue
 
                     is_abono = False
                     for keyword in ABONO_KEYWORDS:
@@ -559,7 +584,8 @@ def determine_transaction_type(
                             transaction["amount"] = None
                             transaction["needs_review"] = True
                             if debug:
-                                print("unknown case a igual (no keywords)")
+                                detail = transaction.get("detail")
+                                print(f"unknown case a igual (no keywords) - Amount: {amount_abs}, Detail: {detail if detail else 'N/A'}")
 
             previous_balance = current_balance
                     
@@ -609,7 +635,7 @@ def determine_transaction_type(
                         transaction["amount"] = None
                         transaction["needs_review"] = True
                         if debug:
-                            print("unknown case b (no keywords)")
+                            print(f"unknown case b (no keywords) - Amount: {amount_abs}, Detail: {detail if detail else 'N/A'}")
 
     # 3. validation (skip UNKNOWN transactions)
     
@@ -620,6 +646,7 @@ def determine_transaction_type(
     count_cargos = 0
     count_unknown = 0
 
+    unknown_amount_total = 0.0
     for transaction in transactions:
         if transaction["movement_type"] == "ABONO":
             total_abonos += transaction["amount"]
@@ -629,12 +656,17 @@ def determine_transaction_type(
             count_cargos += 1
         else:  # UNKNOWN
             count_unknown += 1
+            unknown_amount_total += transaction["amount_abs"]
 
     # compare with summary
     expected_abonos = summary["deposits_amount"]
     expected_cargos = summary["charges_amount"]
     expected_count_abonos = summary["n_deposits"]
     expected_count_cargos = summary["n_charges"]
+
+    # Calculate deltas
+    deposits_delta = expected_abonos - total_abonos
+    charges_delta = total_cargos - expected_cargos
 
     # Report classification results
     if debug:
@@ -653,20 +685,10 @@ def determine_transaction_type(
         if abs(total_cargos - expected_cargos) > 0.1:
             print(f"WARNING: Cargos total mismatch: calculated {total_cargos:.2f}, expected {expected_cargos:.2f}")
 
-        # Note: counts won't match if there are UNKNOWN transactions
-        missing_abonos = expected_count_abonos - count_abonos
-        missing_cargos = expected_count_cargos - count_cargos
-
-        if missing_abonos > 0:
-            print(f"INFO: {missing_abonos} abonos pending classification (likely in UNKNOWN)")
-
-        if missing_cargos > 0:
-            print(f"INFO: {missing_cargos} cargos pending classification (likely in UNKNOWN)")
-
-        # Check if UNKNOWN count matches expected missing
-        expected_unknown = missing_abonos + missing_cargos
-        if count_unknown != expected_unknown:
-            print(f"WARNING: Unknown count ({count_unknown}) doesn't match expected missing ({expected_unknown})")
+        # Print mathematically correct deltas and unknown info
+        print(f"INFO: Deposits delta (expected - calculated) = {deposits_delta:+,.2f}")
+        print(f"INFO: Charges delta (calculated - expected) = {charges_delta:+,.2f}")
+        print(f"INFO: Unknown transactions = {count_unknown} (total UNKNOWN amount = {unknown_amount_total:,.2f})")
 
         # Show UNKNOWN transaction descriptions for debugging
         if count_unknown > 0:
@@ -677,6 +699,110 @@ def determine_transaction_type(
                 if t.get('movement_type') == 'UNKNOWN':
                     print(f"{i}. {t['date']} | {t['description']}")
             print(f"{'='*70}\n")
+
+        # Reconciliation audit - running balance validation
+        print(f"\n{'='*70}")
+        print("RECONCILIATION AUDIT")
+        print(f"{'='*70}")
+
+        running = summary["starting_balance"]
+        print(f"Running balance starts at: {running:,.2f}")
+
+        balance_breaks = []
+        high_risk_transactions = []
+
+        for i, t in enumerate(transactions):
+            movement_type = t.get('movement_type')
+            amount_abs = t['amount_abs']
+            saldo_liquidacion = t.get('saldo_liquidacion')
+            saldo_operacion = t.get('saldo_operacion')
+            description = t['description']
+            date = t['date']
+            detail = t.get('detail', '')
+
+            # Track classification method for high-risk detection
+            has_balance = saldo_liquidacion is not None
+            is_unknown = movement_type == 'UNKNOWN'
+            is_ambiguous = any(kw in normalize_for_classification(description) for kw in AMBIGUOUS_KEYWORDS)
+
+            # Update running balance based on classification
+            running_before = running
+            if movement_type == 'ABONO':
+                running += amount_abs
+            elif movement_type == 'CARGO':
+                running -= amount_abs
+            # UNKNOWN: don't change running (unresolved)
+
+            # Check for balance breaks (only if we have saldo_liquidacion)
+            if saldo_liquidacion is not None:
+                running_rounded = round(running, 2)
+                saldo_rounded = round(saldo_liquidacion, 2)
+                diff = abs(running_rounded - saldo_rounded)
+
+                if diff > 0.01:  # Mismatch detected
+                    balance_breaks.append({
+                        'index': i + 1,
+                        'date': date,
+                        'description': description,
+                        'movement_type': movement_type,
+                        'amount_abs': amount_abs,
+                        'running_expected': running_rounded,
+                        'saldo_actual': saldo_rounded,
+                        'diff': diff,
+                        'case': 'A' if has_balance else 'B'
+                    })
+
+            # Identify high-risk transactions
+            risk_reasons = []
+            if not has_balance:
+                risk_reasons.append('NO_BALANCE')
+            if is_unknown:
+                risk_reasons.append('UNKNOWN')
+            if is_ambiguous:
+                risk_reasons.append('AMBIGUOUS')
+            # Detect keyword-only classification (equal balance fallback)
+            if has_balance and saldo_operacion is not None:
+                prev_saldo = transactions[i-1].get('saldo_liquidacion') if i > 0 else summary["starting_balance"]
+                if prev_saldo and abs(saldo_liquidacion - prev_saldo) < 0.01:
+                    risk_reasons.append('KEYWORD_ONLY')
+
+            if risk_reasons:
+                high_risk_transactions.append({
+                    'index': i + 1,
+                    'date': date,
+                    'description': description,
+                    'movement_type': movement_type,
+                    'amount_abs': amount_abs,
+                    'reasons': risk_reasons,
+                    'detail': detail[:50] if detail else 'N/A'
+                })
+
+        # Report balance breaks
+        print(f"Number of BALANCE_BREAK flags: {len(balance_breaks)}")
+        if balance_breaks:
+            print(f"\nTop {min(10, len(balance_breaks))} Balance Breaks:")
+            print(f"{'-'*70}")
+            for brk in balance_breaks[:10]:
+                print(f"{brk['index']:3}. {brk['date']} | {brk['description'][:40]}")
+                print(f"     Type: {brk['movement_type']:7} | Amount: {brk['amount_abs']:>10,.2f}")
+                print(f"     Running: {brk['running_expected']:>10,.2f} | Actual: {brk['saldo_actual']:>10,.2f} | Diff: {brk['diff']:>8,.2f}")
+                print(f"     Case: {brk['case']}")
+                print()
+
+        # Report high-risk transactions
+        print(f"\nHigh-Risk Transactions: {len(high_risk_transactions)}")
+        if high_risk_transactions:
+            print(f"Top {min(10, len(high_risk_transactions))}:")
+            print(f"{'-'*70}")
+            for risk in high_risk_transactions[:10]:
+                reasons_str = ', '.join(risk['reasons'])
+                print(f"{risk['index']:3}. {risk['date']} | {risk['description'][:35]}")
+                print(f"     Type: {risk['movement_type']:7} | Amount: {risk['amount_abs']:>10,.2f}")
+                print(f"     Risks: {reasons_str}")
+                print(f"     Detail: {risk['detail']}")
+                print()
+
+        print(f"{'='*70}\n")
 
     return transactions
 
