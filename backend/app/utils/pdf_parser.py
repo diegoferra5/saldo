@@ -495,9 +495,36 @@ def determine_transaction_type(
         current_balance = transaction["saldo_liquidacion"]
         amount_abs = transaction["amount_abs"]
         description = transaction["description"]
-        
+
         # Initialize review flag
         transaction["needs_review"] = False
+
+        # Normalize description ONCE for all checks
+        description_norm = normalize_for_classification(description)
+
+        # HARD OVERRIDES (MVP safety net for high-confidence keywords)
+        # These bypass balance logic to avoid known classification bugs
+        # TODO: Revisit balance comparison logic and remove overrides once fixed
+
+        # SPEI RECIBIDO - always incoming transfer
+        if "SPEI" in description_norm and "RECIBIDO" in description_norm:
+            transaction["movement_type"] = "ABONO"
+            transaction["amount"] = amount_abs
+            if debug:
+                print("abono hard override (SPEI RECIBIDO)")
+            if current_balance is not None:
+                previous_balance = current_balance
+            continue
+
+        # SPEI ENVIADO - always outgoing transfer
+        if "SPEI" in description_norm and "ENVIADO" in description_norm:
+            transaction["movement_type"] = "CARGO"
+            transaction["amount"] = -amount_abs
+            if debug:
+                print("cargo hard override (SPEI ENVIADO)")
+            if current_balance is not None:
+                previous_balance = current_balance
+            continue
 
         # case A: Has balance (more reliable)
         if current_balance is not None:
@@ -700,107 +727,101 @@ def determine_transaction_type(
                     print(f"{i}. {t['date']} | {t['description']}")
             print(f"{'='*70}\n")
 
-        # Reconciliation audit - running balance validation
+        # Reconciliation audit - anchor-based balance validation
+        def signed_amount(t: TransactionDict) -> Optional[float]:
+            mt = t.get("movement_type")
+            if mt == "ABONO":
+                return float(t["amount_abs"])
+            if mt == "CARGO":
+                return -float(t["amount_abs"])
+            return None  # UNKNOWN or None
+
         print(f"\n{'='*70}")
-        print("RECONCILIATION AUDIT")
+        print("RECONCILIATION AUDIT (ANCHOR-BASED)")
         print(f"{'='*70}")
 
-        running = summary["starting_balance"]
-        print(f"Running balance starts at: {running:,.2f}")
+        # Find anchors: indices where saldo_liquidacion exists
+        anchors = [i for i, t in enumerate(transactions) if t.get("saldo_liquidacion") is not None]
 
-        balance_breaks = []
-        high_risk_transactions = []
+        print(f"Anchors found: {len(anchors)}")
 
-        for i, t in enumerate(transactions):
-            movement_type = t.get('movement_type')
-            amount_abs = t['amount_abs']
-            saldo_liquidacion = t.get('saldo_liquidacion')
-            saldo_operacion = t.get('saldo_operacion')
-            description = t['description']
-            date = t['date']
-            detail = t.get('detail', '')
+        if len(anchors) == 0:
+            print("No anchors available (no saldo_liquidacion). Skipping audit.")
+        else:
+            # Initial anchor balance is starting_balance, BEFORE first anchor we reconcile from starting_balance
+            prev_anchor_idx = None
+            prev_anchor_balance = summary["starting_balance"]
 
-            # Track classification method for high-risk detection
-            has_balance = saldo_liquidacion is not None
-            is_unknown = movement_type == 'UNKNOWN'
-            is_ambiguous = any(kw in normalize_for_classification(description) for kw in AMBIGUOUS_KEYWORDS)
+            segment_breaks = []
 
-            # Update running balance based on classification
-            running_before = running
-            if movement_type == 'ABONO':
-                running += amount_abs
-            elif movement_type == 'CARGO':
-                running -= amount_abs
-            # UNKNOWN: don't change running (unresolved)
+            # We'll treat each anchor as the end of a segment.
+            for anchor_pos, anchor_idx in enumerate(anchors):
+                anchor_balance = float(transactions[anchor_idx]["saldo_liquidacion"])
 
-            # Check for balance breaks (only if we have saldo_liquidacion)
-            if saldo_liquidacion is not None:
-                running_rounded = round(running, 2)
-                saldo_rounded = round(saldo_liquidacion, 2)
-                diff = abs(running_rounded - saldo_rounded)
+                # Segment boundaries:
+                # from (prev_anchor_idx + 1) to anchor_idx inclusive
+                start_idx = 0 if prev_anchor_idx is None else prev_anchor_idx + 1
+                end_idx = anchor_idx
 
-                if diff > 0.01:  # Mismatch detected
-                    balance_breaks.append({
-                        'index': i + 1,
-                        'date': date,
-                        'description': description,
-                        'movement_type': movement_type,
-                        'amount_abs': amount_abs,
-                        'running_expected': running_rounded,
-                        'saldo_actual': saldo_rounded,
-                        'diff': diff,
-                        'case': 'A' if has_balance else 'B'
+                seg = transactions[start_idx:end_idx + 1]
+
+                # Compute deltas in this segment
+                computed_delta = 0.0
+                unknown_count = 0
+                no_balance_count = 0
+                suspicious = []
+
+                for j, t in enumerate(seg, start=start_idx):
+                    sa = signed_amount(t)
+                    if sa is None:
+                        unknown_count += 1
+                        suspicious.append(j)
+                        continue
+                    computed_delta += sa
+
+                    if t.get("saldo_liquidacion") is None:
+                        no_balance_count += 1  # risk factor
+
+                expected_delta = anchor_balance - prev_anchor_balance
+                diff = round(expected_delta - computed_delta, 2)
+
+                # Record breaks only if mismatch meaningful
+                if abs(diff) > 0.01:
+                    segment_breaks.append({
+                        "segment_start": start_idx + 1,
+                        "segment_end": end_idx + 1,
+                        "prev_anchor_balance": round(prev_anchor_balance, 2),
+                        "anchor_balance": round(anchor_balance, 2),
+                        "expected_delta": round(expected_delta, 2),
+                        "computed_delta": round(computed_delta, 2),
+                        "diff": diff,
+                        "unknown_count": unknown_count,
+                        "no_balance_count": no_balance_count,
+                        "suspicious_indices": suspicious[:10],  # cap
                     })
 
-            # Identify high-risk transactions
-            risk_reasons = []
-            if not has_balance:
-                risk_reasons.append('NO_BALANCE')
-            if is_unknown:
-                risk_reasons.append('UNKNOWN')
-            if is_ambiguous:
-                risk_reasons.append('AMBIGUOUS')
-            # Detect keyword-only classification (equal balance fallback)
-            if has_balance and saldo_operacion is not None:
-                prev_saldo = transactions[i-1].get('saldo_liquidacion') if i > 0 else summary["starting_balance"]
-                if prev_saldo and abs(saldo_liquidacion - prev_saldo) < 0.01:
-                    risk_reasons.append('KEYWORD_ONLY')
+                # Move anchor forward
+                prev_anchor_idx = anchor_idx
+                prev_anchor_balance = anchor_balance
 
-            if risk_reasons:
-                high_risk_transactions.append({
-                    'index': i + 1,
-                    'date': date,
-                    'description': description,
-                    'movement_type': movement_type,
-                    'amount_abs': amount_abs,
-                    'reasons': risk_reasons,
-                    'detail': detail[:50] if detail else 'N/A'
-                })
+            print(f"Segments checked: {len(anchors)}")
+            print(f"Segments with mismatch: {len(segment_breaks)}")
 
-        # Report balance breaks
-        print(f"Number of BALANCE_BREAK flags: {len(balance_breaks)}")
-        if balance_breaks:
-            print(f"\nTop {min(10, len(balance_breaks))} Balance Breaks:")
-            print(f"{'-'*70}")
-            for brk in balance_breaks[:10]:
-                print(f"{brk['index']:3}. {brk['date']} | {brk['description'][:40]}")
-                print(f"     Type: {brk['movement_type']:7} | Amount: {brk['amount_abs']:>10,.2f}")
-                print(f"     Running: {brk['running_expected']:>10,.2f} | Actual: {brk['saldo_actual']:>10,.2f} | Diff: {brk['diff']:>8,.2f}")
-                print(f"     Case: {brk['case']}")
-                print()
-
-        # Report high-risk transactions
-        print(f"\nHigh-Risk Transactions: {len(high_risk_transactions)}")
-        if high_risk_transactions:
-            print(f"Top {min(10, len(high_risk_transactions))}:")
-            print(f"{'-'*70}")
-            for risk in high_risk_transactions[:10]:
-                reasons_str = ', '.join(risk['reasons'])
-                print(f"{risk['index']:3}. {risk['date']} | {risk['description'][:35]}")
-                print(f"     Type: {risk['movement_type']:7} | Amount: {risk['amount_abs']:>10,.2f}")
-                print(f"     Risks: {reasons_str}")
-                print(f"     Detail: {risk['detail']}")
-                print()
+            if segment_breaks:
+                print(f"\nTop {min(10, len(segment_breaks))} segment mismatches:")
+                print("-"*70)
+                for s in segment_breaks[:10]:
+                    print(f"Segment {s['segment_start']}-{s['segment_end']}")
+                    print(f"  Anchor: {s['prev_anchor_balance']:,.2f} -> {s['anchor_balance']:,.2f}")
+                    print(f"  Expected delta: {s['expected_delta']:+,.2f}")
+                    print(f"  Computed delta: {s['computed_delta']:+,.2f}")
+                    print(f"  Diff (expected - computed): {s['diff']:+,.2f}")
+                    print(f"  UNKNOWN in segment: {s['unknown_count']}, NO_BALANCE in segment: {s['no_balance_count']}")
+                    if s["suspicious_indices"]:
+                        # indices are 0-based; show 1-based in print
+                        sus = [idx + 1 for idx in s["suspicious_indices"]]
+                        print(f"  Suspicious tx indices (first 10): {sus}")
+                    print()
 
         print(f"{'='*70}\n")
 
