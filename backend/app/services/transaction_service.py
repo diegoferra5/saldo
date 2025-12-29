@@ -133,6 +133,8 @@ def create_transaction_from_parser_dict(
         needs_review = bool(needs_review)
 
     # 6) Compute transaction_hash using normalized amount_abs (Decimal)
+    # Include occurrence_index to handle multiple identical transactions in same statement
+    occurrence_index = parser_dict.get('_occurrence_index', 0)
     transaction_hash = compute_transaction_hash(
         user_id=user_id,
         account_id=account_id,
@@ -140,6 +142,7 @@ def create_transaction_from_parser_dict(
         transaction_date=transaction_date,
         description=str(parser_dict["description"]),
         amount_abs=amount_abs,
+        occurrence_index=occurrence_index,
     )
 
     # 7) Build ORM object (match your model fields)
@@ -189,11 +192,25 @@ def create_transactions_from_parser_output(
 
     Note:
     - No commit here; caller should db.commit() once after loop + statement status updates.
+    - Handles duplicate transactions within same statement by tracking occurrence count
     """
     created: List[Transaction] = []
     duplicates = 0
 
+    # Track occurrence count for identical transactions (same content, different occurrences)
+    seen_content: Dict[str, int] = {}
+
     for d in parser_transactions:
+        # Create content key (without occurrence index)
+        content_key = f"{d.get('date')}:{d.get('description')}:{d.get('amount_abs')}"
+
+        # Track occurrence index for this content
+        occurrence_index = seen_content.get(content_key, 0)
+        seen_content[content_key] = occurrence_index + 1
+
+        # Add occurrence index to parser dict for hash computation
+        d['_occurrence_index'] = occurrence_index
+
         tx = create_transaction_from_parser_dict(
             parser_dict=d,
             user_id=user_id,

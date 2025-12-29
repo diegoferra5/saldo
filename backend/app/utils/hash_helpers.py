@@ -11,7 +11,8 @@ def compute_transaction_hash(
     statement_id: UUID,
     transaction_date: date,
     description: str,
-    amount_abs: Decimal | float
+    amount_abs: Decimal | float,
+    occurrence_index: int = 0
 ) -> str:
     """
     Compute SHA256 hash for transaction deduplication.
@@ -19,10 +20,11 @@ def compute_transaction_hash(
     Hash includes stable identifiers only:
     - user_id
     - account_id
-    - statement_id (allows duplicate transactions within same statement)
+    - statement_id (scopes uniqueness to specific statement)
     - transaction_date (full date)
     - description (normalized)
     - amount_abs (normalized to 2 decimals)
+    - occurrence_index (allows multiple identical transactions in same statement)
 
     Returns:
         64-character hex string (SHA256)
@@ -44,14 +46,15 @@ def compute_transaction_hash(
         amount_str = f"{float(amount_abs):.2f}"
 
     # Build deterministic string representation
-    # Format: user_id:account_id:statement_id:YYYY-MM-DD:DESCRIPTION:amount
+    # Format: user_id:account_id:statement_id:YYYY-MM-DD:DESCRIPTION:amount:occurrence
     hash_input = (
         f"{user_id}:"
         f"{account_id}:"
         f"{statement_id}:"
         f"{transaction_date.isoformat()}:"
         f"{description_norm}:"
-        f"{amount_str}"
+        f"{amount_str}:"
+        f"{occurrence_index}"
     )
 
     return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
