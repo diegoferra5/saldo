@@ -244,7 +244,7 @@ def get_transactions_by_user(
     Security: always filters by user_id.
     """
     # Clamp to prevent abuse
-    limit = min(max(limit, 1), 500)
+    limit = min(max(limit, 1), 200)
     offset = max(offset, 0)
 
     q = db.query(Transaction).filter(Transaction.user_id == user_id)
