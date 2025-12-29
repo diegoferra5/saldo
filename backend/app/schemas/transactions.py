@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, model_validator
-from datetime import DateType, datetime
+from datetime import date as DateType, datetime
 from typing import Optional
 from uuid import UUID
 from decimal import Decimal
