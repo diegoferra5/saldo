@@ -8,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes import auth
-from app.routes import statements 
+from app.routes import statements
+from app.routes import transactions 
 
 app = FastAPI(
     title= "Saldo Api",
@@ -27,8 +28,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)  
+app.include_router(auth.router)
 app.include_router(statements.router)
+app.include_router(transactions.router)
 
 # Root endpoint - Health check
 @app.get("/")
