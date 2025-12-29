@@ -8,6 +8,7 @@ from decimal import Decimal
 def compute_transaction_hash(
     user_id: UUID,
     account_id: UUID,
+    statement_id: UUID,
     transaction_date: date,
     description: str,
     amount_abs: Decimal | float
@@ -18,6 +19,7 @@ def compute_transaction_hash(
     Hash includes stable identifiers only:
     - user_id
     - account_id
+    - statement_id (allows duplicate transactions within same statement)
     - transaction_date (full date)
     - description (normalized)
     - amount_abs (normalized to 2 decimals)
@@ -25,8 +27,8 @@ def compute_transaction_hash(
     Returns:
         64-character hex string (SHA256)
     """
-    if not user_id or not account_id:
-        raise ValueError("user_id and account_id are required")
+    if not user_id or not account_id or not statement_id:
+        raise ValueError("user_id, account_id, and statement_id are required")
     if not isinstance(transaction_date, date):
         raise ValueError(f"transaction_date must be a date, got: {type(transaction_date)}")
     if description is None:
@@ -42,10 +44,11 @@ def compute_transaction_hash(
         amount_str = f"{float(amount_abs):.2f}"
 
     # Build deterministic string representation
-    # Format: user_id:account_id:YYYY-MM-DD:DESCRIPTION:amount
+    # Format: user_id:account_id:statement_id:YYYY-MM-DD:DESCRIPTION:amount
     hash_input = (
         f"{user_id}:"
         f"{account_id}:"
+        f"{statement_id}:"
         f"{transaction_date.isoformat()}:"
         f"{description_norm}:"
         f"{amount_str}"

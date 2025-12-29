@@ -136,6 +136,7 @@ def create_transaction_from_parser_dict(
     transaction_hash = compute_transaction_hash(
         user_id=user_id,
         account_id=account_id,
+        statement_id=statement_id,
         transaction_date=transaction_date,
         description=str(parser_dict["description"]),
         amount_abs=amount_abs,
