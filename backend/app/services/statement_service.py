@@ -17,12 +17,7 @@ from app.models.account import Account
 from app.services.account_service import get_or_create_account
 
 
-from app.utils.pdf_parser import (
-    extract_transaction_lines,
-    parse_transaction_line,
-    extract_statement_summary,
-    determine_transaction_type,
-)
+from app.utils.pdf_parser import parse_bbva_debit_statement
 
 from app.services.transaction_service import create_transactions_from_parser_output
 
@@ -204,21 +199,24 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         statement.error_message = None
         db.flush()  # keep everything in one DB transaction
 
-        # Extract raw transaction lines
-        lines = extract_transaction_lines(pdf_path)
+        # Validate parser availability (MVP: only BBVA DEBIT supported)
+        if statement.bank_name.upper() != "BBVA" or statement.account_type.upper() != "DEBIT":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parser not yet implemented for {statement.bank_name} {statement.account_type}. "
+                       f"Currently supported: BBVA DEBIT only."
+            )
 
-        # Parse each line into a dict
-        parsed: List[dict] = []
-        for line in lines:
-            d = parse_transaction_line(line)
-            if d:
-                parsed.append(d)
+        # Parse PDF using orchestrated parser function
+        result = parse_bbva_debit_statement(pdf_path, debug=False)
 
-        # Extract summary and classify (CARGO/ABONO/UNKNOWN)
-        summary = extract_statement_summary(pdf_path)
-        determine_transaction_type(parsed, summary)
+        parsed = result["transactions"]
+        summary = result["summary"]
 
-       # Ensure Account exists (get or create)
+        if not summary:
+            raise ValueError("Failed to extract statement summary from PDF")
+
+        # Ensure Account exists (get or create)
         account = get_or_create_account(
             db=db,
             user_id=statement.user_id,
@@ -229,12 +227,6 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         # Link statement to account
         statement.account_id = account.id
         db.flush()
-
-
-        # always link statement to account (existing or new)
-        statement.account_id = account.id
-        db.flush()
-
 
         # Insert transactions in batch (savepoints + flush, no commit inside)
         created, duplicates = create_transactions_from_parser_output(
@@ -256,10 +248,10 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         return {
             "statement_id": str(statement.id),
             "status": "success",
-            "transactions_found_lines": len(lines),
             "transactions_parsed": len(parsed),
             "transactions_inserted": len(created),
             "duplicates_skipped": duplicates,
+            "warnings": result.get("warnings", []),
         }
 
     except Exception as e:

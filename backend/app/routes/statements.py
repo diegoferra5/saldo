@@ -145,3 +145,37 @@ async def delete_statement(
     
     # 204 No Content - successful deletion
     return None
+
+@router.post("/{statement_id}/process")
+def process_statement(
+    statement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Parse statement PDF and generate transactions.
+    
+    Process:
+    1. Verify statement exists and belongs to user
+    2. Extract transactions from PDF
+    3. Classify as CARGO/ABONO/UNKNOWN
+    4. Insert into database
+    
+    Returns:
+        {
+            "statement_id": "...",
+            "status": "success",
+            "transactions_found_lines": 45,
+            "transactions_parsed": 43,
+            "transactions_inserted": 40,
+            "duplicates_skipped": 3
+        }
+    """
+    # This already checks ownership and raises 404 if not found
+    result = statement_service.process_statement(
+        db=db,
+        statement_id=statement_id,
+        user_id=current_user.id
+    )
+
+    return result
