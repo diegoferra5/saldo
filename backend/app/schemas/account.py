@@ -6,8 +6,14 @@ from uuid import UUID
 
 
 class AccountType(str, Enum):
-    debit = "DEBIT"
-    credit = "CREDIT"
+    """
+    Account type enum - uppercase to match DB storage.
+
+    Values stored in DB are uppercase (DEBIT, CREDIT).
+    Swagger will show dropdown with these exact values.
+    """
+    DEBIT = "DEBIT"
+    CREDIT = "CREDIT"
 
 
 class AccountBase(BaseModel):

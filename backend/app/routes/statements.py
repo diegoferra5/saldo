@@ -10,7 +10,7 @@ from app.models.user import User
 from app.schemas.statement import StatementResponse, StatementList, StatementHealthResponse
 from app.services import statement_service
 
-router = APIRouter(prefix="/api/statements", tags=["statements"])
+router = APIRouter(prefix="/api/statements", tags=["Statements"])
 
 
 @router.post("/upload", response_model=StatementResponse, status_code=201)
