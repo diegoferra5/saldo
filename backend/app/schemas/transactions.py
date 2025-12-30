@@ -112,6 +112,11 @@ class TransactionUpdate(BaseModel):
     def check_at_least_one_field(self):
         if self.category is None and self.needs_review is None and self.movement_type is None:
             raise ValueError("At least one field must be provided for update")
+
+        # Prevent setting to UNKNOWN (transactions should be classified as CARGO or ABONO)
+        if self.movement_type == MovementType.UNKNOWN:
+            raise ValueError("Cannot set movement_type to UNKNOWN. Use CARGO or ABONO to classify the transaction.")
+
         return self
 
     model_config = ConfigDict(
@@ -121,6 +126,31 @@ class TransactionUpdate(BaseModel):
                 "category": "Entertainment",
                 "needs_review": False,
                 "movement_type": "CARGO"
+            }
+        }
+    )
+
+
+class TransactionStats(BaseModel):
+    """Transaction statistics by type (output)"""
+    count_cargo: int
+    count_abono: int
+    count_unknown: int
+    total_cargo: Decimal  # Negative
+    total_abono: Decimal  # Positive
+    net_balance: Decimal
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "count_cargo": 45,
+                "count_abono": 12,
+                "count_unknown": 3,
+                "total_cargo": -15750.50,
+                "total_abono": 28000.00,
+                "net_balance": 12249.50
             }
         }
     )

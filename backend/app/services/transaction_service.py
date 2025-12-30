@@ -333,3 +333,68 @@ def count_transactions_by_type(user_id: UUID, db: Session) -> Dict[str, int]:
     )
 
     return {str(movement_type): int(count) for movement_type, count in rows}
+
+
+def get_transaction_by_id(
+    transaction_id: UUID,
+    user_id: UUID,
+    db: Session,
+) -> Optional[Transaction]:
+    """
+    Get single transaction with ownership check.
+    Returns None if not found or not owned by user.
+    """
+    return (
+        db.query(Transaction)
+        .filter(
+            Transaction.id == transaction_id,
+            Transaction.user_id == user_id
+        )
+        .first()
+    )
+
+
+def sum_transactions_by_type(user_id: UUID, db: Session) -> Dict[str, Decimal]:
+    """
+    Sum transaction amounts grouped by movement_type.
+
+    Returns:
+        {
+            "total_cargo": Decimal (negative),
+            "total_abono": Decimal (positive),
+            "net_balance": Decimal
+        }
+
+    Notes:
+    - Only sums transactions with movement_type != UNKNOWN (those have amount=None)
+    - total_cargo will be negative (sum of expenses)
+    - total_abono will be positive (sum of income)
+    - net_balance = total_abono + total_cargo
+    """
+    # Sum CARGO transactions (should be negative amounts)
+    cargo_sum = (
+        db.query(func.sum(Transaction.amount))
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.movement_type == "CARGO",
+            Transaction.amount.isnot(None)
+        )
+        .scalar()
+    ) or Decimal("0")
+
+    # Sum ABONO transactions (should be positive amounts)
+    abono_sum = (
+        db.query(func.sum(Transaction.amount))
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.movement_type == "ABONO",
+            Transaction.amount.isnot(None)
+        )
+        .scalar()
+    ) or Decimal("0")
+
+    return {
+        "total_cargo": cargo_sum,
+        "total_abono": abono_sum,
+        "net_balance": abono_sum + cargo_sum
+    }
