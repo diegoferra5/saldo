@@ -4,15 +4,18 @@ import os
 import hashlib
 import re
 from datetime import datetime, date
-from typing import Optional, List, Tuple
+from decimal import Decimal
+from typing import Optional, List, Tuple, Dict, Any
 from uuid import UUID
 
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 
 from app.models.statement import Statement
 from app.models.account import Account
+from app.models.transaction import Transaction
 
 from app.services.account_service import get_or_create_account
 
@@ -272,3 +275,112 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
             db.commit()
 
         raise HTTPException(status_code=500, detail=f"Failed to process statement: {str(e)}")
+
+
+# -------------------------
+# Statement Health / Reconciliation
+# -------------------------
+
+def get_statement_health(
+    db: Session,
+    statement_id: UUID,
+    user_id: UUID,
+    threshold: Decimal = Decimal("10.00"),
+) -> Dict[str, Any]:
+    """
+    Check statement reconciliation health.
+
+    Compares PDF summary (from summary_data JSONB) vs actual DB transactions.
+
+    Args:
+        db: Database session
+        statement_id: Statement UUID
+        user_id: User UUID (for security - ensure statement belongs to user)
+        threshold: Reconciliation threshold (default 10.00)
+
+    Returns:
+        Dict with:
+        - statement_id
+        - has_summary_data
+        - threshold
+        - db_cash_flow: sum of transactions.amount (signed) for this statement
+        - pdf_cash_flow: deposits_amount - charges_amount from summary_data
+        - difference: db_cash_flow - pdf_cash_flow
+        - is_reconciled: True if abs(difference) < threshold
+        - warnings: list of warning codes
+
+    Raises:
+        HTTPException 404 if statement not found or doesn't belong to user
+    """
+    # Get statement (security check)
+    statement = get_statement_by_id(db, statement_id, user_id)
+
+    warnings = []
+
+    # Calculate db_cash_flow: sum of amount (signed) for this statement, excluding UNKNOWN (amount=NULL)
+    db_cash_flow = (
+        db.query(func.sum(Transaction.amount))
+        .filter(
+            Transaction.statement_id == statement_id,
+            Transaction.user_id == user_id,
+            Transaction.amount.isnot(None)  # Exclude UNKNOWN
+        )
+        .scalar()
+    ) or Decimal("0")
+
+    # Check for UNKNOWN transactions
+    unknown_count = (
+        db.query(func.count(Transaction.id))
+        .filter(
+            Transaction.statement_id == statement_id,
+            Transaction.user_id == user_id,
+            Transaction.movement_type == "UNKNOWN"
+        )
+        .scalar()
+    ) or 0
+
+    if unknown_count > 0:
+        warnings.append("INCOMPLETE_DUE_TO_UNKNOWN")
+
+    # Check if summary_data exists
+    has_summary_data = statement.summary_data is not None
+
+    if not has_summary_data:
+        warnings.append("NO_SUMMARY_DATA")
+        return {
+            "statement_id": statement_id,
+            "has_summary_data": False,
+            "threshold": threshold,
+            "db_cash_flow": db_cash_flow,
+            "pdf_cash_flow": None,
+            "difference": None,
+            "is_reconciled": None,
+            "warnings": warnings,
+        }
+
+    # Extract PDF cash flow from summary_data
+    summary_data = statement.summary_data
+    deposits_amount = Decimal(str(summary_data.get("deposits_amount", 0)))
+    charges_amount = Decimal(str(summary_data.get("charges_amount", 0)))
+
+    # pdf_cash_flow = deposits (positive) - charges (absolute value, since charges_amount is stored positive)
+    # Note: charges_amount in summary_data is stored as positive value (e.g., 56862.50)
+    # So we need to subtract it to get the cash flow
+    pdf_cash_flow = deposits_amount - charges_amount
+
+    # Calculate difference
+    difference = db_cash_flow - pdf_cash_flow
+
+    # Determine if reconciled
+    is_reconciled = abs(difference) < threshold
+
+    return {
+        "statement_id": statement_id,
+        "has_summary_data": True,
+        "threshold": threshold,
+        "db_cash_flow": db_cash_flow,
+        "pdf_cash_flow": pdf_cash_flow,
+        "difference": difference,
+        "is_reconciled": is_reconciled,
+        "warnings": warnings,
+    }

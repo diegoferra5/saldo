@@ -7,7 +7,7 @@ from uuid import UUID
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.statement import StatementResponse, StatementList
+from app.schemas.statement import StatementResponse, StatementList, StatementHealthResponse
 from app.services import statement_service
 
 router = APIRouter(prefix="/api/statements", tags=["statements"])
@@ -104,6 +104,40 @@ async def list_statements(
     )
     
     return statements
+
+
+@router.get("/{statement_id}/health", response_model=StatementHealthResponse)
+async def get_statement_health(
+    statement_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Check statement reconciliation health.
+
+    Compares PDF summary (from summary_data JSONB) vs actual DB transactions.
+
+    Returns:
+    - db_cash_flow: Sum of transactions.amount (signed) for this statement
+    - pdf_cash_flow: deposits_amount - charges_amount from summary_data
+    - difference: db_cash_flow - pdf_cash_flow
+    - is_reconciled: True if abs(difference) < threshold (10.00)
+    - warnings: List of warning codes:
+        - "NO_SUMMARY_DATA": summary_data is NULL
+        - "INCOMPLETE_DUE_TO_UNKNOWN": Statement has UNKNOWN transactions
+
+    Security: Only returns health if statement belongs to authenticated user.
+    """
+    from decimal import Decimal
+
+    result = statement_service.get_statement_health(
+        db=db,
+        statement_id=statement_id,
+        user_id=current_user.id,
+        threshold=Decimal("10.00")
+    )
+
+    return StatementHealthResponse(**result)
 
 
 @router.get("/{statement_id}", response_model=StatementResponse)
