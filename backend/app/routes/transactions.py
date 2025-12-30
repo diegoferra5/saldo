@@ -90,6 +90,7 @@ def list_transactions(
 @router.get("/stats", response_model=TransactionStatsResponse)
 def get_transaction_stats(
     # Filters
+    statement_id: Optional[UUID] = Query(None, description="Filter by statement"),
     account_id: Optional[UUID] = Query(None, description="Filter by account"),
     account_type: Optional[str] = Query(None, description="Filter by account type (debit|credit)"),
     date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
@@ -105,6 +106,7 @@ def get_transaction_stats(
     Does NOT include account balances - only transaction flows.
 
     Filters:
+    - statement_id: Filter by statement (e.g., specific month/period)
     - account_id: Filter by specific account
     - account_type: Filter by account type (debit | credit)
     - date_from: Start date (YYYY-MM-DD)
@@ -131,6 +133,7 @@ def get_transaction_stats(
     result = get_cash_flow_stats(
         user_id=current_user.id,
         db=db,
+        statement_id=statement_id,
         account_id=account_id,
         account_type=account_type,
         date_from=date_from,

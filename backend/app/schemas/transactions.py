@@ -153,13 +153,15 @@ class DateRange(BaseModel):
 
 
 class CashFlowStats(BaseModel):
-    """Cash flow statistics (income - expenses)"""
+    """Cash flow statistics (income - expenses) - used for both global and by_account_type"""
     total_abono: Decimal   # Positive (income)
     total_cargo: Decimal   # Negative (expenses)
     cash_flow: Decimal     # total_abono + total_cargo
-    count_abono: Optional[int] = None  # Only in global stats
-    count_cargo: Optional[int] = None  # Only in global stats
-    count_unknown: Optional[int] = None  # Only in global stats
+    count_abono: int  # Always present
+    count_cargo: int  # Always present
+    count_unknown: int  # Always present
+    is_complete: bool  # False if count_unknown > 0
+    unknown_amount_abs_total: Decimal  # Sum of amount_abs for UNKNOWN transactions
 
     model_config = ConfigDict(
         from_attributes=True,

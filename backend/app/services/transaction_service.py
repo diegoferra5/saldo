@@ -27,7 +27,7 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_, case, func
 
 from app.models.transaction import Transaction  # aligns with your Transaction model 
 from app.schemas.transactions import MovementType
@@ -408,6 +408,7 @@ def sum_transactions_by_type(user_id: UUID, db: Session) -> Dict[str, Decimal]:
 def get_cash_flow_stats(
     user_id: UUID,
     db: Session,
+    statement_id: Optional[UUID] = None,
     account_id: Optional[UUID] = None,
     account_type: Optional[str] = None,
     date_from: Optional[date] = None,
@@ -421,6 +422,7 @@ def get_cash_flow_stats(
 
     Args:
         user_id: User ID (required)
+        statement_id: Filter by statement (optional)
         account_id: Filter by specific account (optional)
         account_type: Filter by account type "debit" | "credit" (optional)
         date_from: Start date (optional)
@@ -450,6 +452,9 @@ def get_cash_flow_stats(
 
     # Apply filters
     base_query = base_query.filter(Transaction.user_id == user_id)
+
+    if statement_id is not None:
+        base_query = base_query.filter(Transaction.statement_id == statement_id)
 
     if account_id is not None:
         base_query = base_query.filter(Transaction.account_id == account_id)
@@ -484,6 +489,14 @@ def get_cash_flow_stats(
         .scalar()
     ) or Decimal("0")
 
+    # Sum of amount_abs for UNKNOWN transactions (informative only)
+    unknown_amount_abs_sum = (
+        base_query
+        .filter(Transaction.movement_type == "UNKNOWN", Transaction.amount_abs.isnot(None))
+        .with_entities(func.sum(Transaction.amount_abs))
+        .scalar()
+    ) or Decimal("0")
+
     global_stats = {
         "total_abono": abono_sum,
         "total_cargo": cargo_sum,
@@ -491,61 +504,86 @@ def get_cash_flow_stats(
         "count_abono": count_abono,
         "count_cargo": count_cargo,
         "count_unknown": count_unknown,
+        "is_complete": count_unknown == 0,
+        "unknown_amount_abs_total": unknown_amount_abs_sum,
     }
 
-    # BY ACCOUNT TYPE (group by account_type)
-    by_account_type = {}
-
-    # Query grouped by account_type
-    grouped_query = (
+    # BY ACCOUNT TYPE (consolidated query with CASE WHEN)
+    # Single query to get all aggregated data by account_type and movement_type
+    aggregated_query = (
         db.query(
             Account.account_type,
             Transaction.movement_type,
-            func.sum(Transaction.amount).label("total")
+            func.count(Transaction.id).label("count"),
+            func.sum(
+                case(
+                    (Transaction.amount.isnot(None), Transaction.amount),
+                    else_=0
+                )
+            ).label("amount_sum"),
+            func.sum(
+                case(
+                    (Transaction.amount_abs.isnot(None), Transaction.amount_abs),
+                    else_=0
+                )
+            ).label("amount_abs_sum")
         )
         .join(Account, Transaction.account_id == Account.id)
-        .filter(
-            Transaction.user_id == user_id,
-            Transaction.amount.isnot(None)  # Exclude UNKNOWN
-        )
+        .filter(Transaction.user_id == user_id)
     )
 
-    # Apply same filters
+    # Apply filters
+    if statement_id is not None:
+        aggregated_query = aggregated_query.filter(Transaction.statement_id == statement_id)
+
     if account_id is not None:
-        grouped_query = grouped_query.filter(Transaction.account_id == account_id)
+        aggregated_query = aggregated_query.filter(Transaction.account_id == account_id)
 
     if account_type is not None:
-        grouped_query = grouped_query.filter(Account.account_type == account_type)
+        aggregated_query = aggregated_query.filter(Account.account_type == account_type)
 
     if date_from is not None:
-        grouped_query = grouped_query.filter(Transaction.transaction_date >= date_from)
+        aggregated_query = aggregated_query.filter(Transaction.transaction_date >= date_from)
 
     if date_to is not None:
-        grouped_query = grouped_query.filter(Transaction.transaction_date <= date_to)
+        aggregated_query = aggregated_query.filter(Transaction.transaction_date <= date_to)
 
-    grouped_query = grouped_query.group_by(Account.account_type, Transaction.movement_type)
+    aggregated_query = aggregated_query.group_by(Account.account_type, Transaction.movement_type)
+    aggregated_results = aggregated_query.all()
 
-    results = grouped_query.all()
-
-    # Process results
-    for acc_type, mov_type, total in results:
-        if acc_type not in by_account_type:
-            by_account_type[acc_type] = {
-                "total_abono": Decimal("0"),
-                "total_cargo": Decimal("0"),
-                "cash_flow": Decimal("0"),
+    # Build by_account_type structure from aggregated results
+    # First pass: collect all data
+    raw_data = {}
+    for acc_type, mov_type, count, amount_sum, amount_abs_sum in aggregated_results:
+        if acc_type not in raw_data:
+            raw_data[acc_type] = {
+                "ABONO": {"count": 0, "amount_sum": Decimal("0")},
+                "CARGO": {"count": 0, "amount_sum": Decimal("0")},
+                "UNKNOWN": {"count": 0, "amount_abs_sum": Decimal("0")},
             }
 
-        if mov_type == "ABONO":
-            by_account_type[acc_type]["total_abono"] = total or Decimal("0")
-        elif mov_type == "CARGO":
-            by_account_type[acc_type]["total_cargo"] = total or Decimal("0")
+        if mov_type in ("ABONO", "CARGO"):
+            raw_data[acc_type][mov_type]["count"] = count
+            raw_data[acc_type][mov_type]["amount_sum"] = amount_sum or Decimal("0")
+        elif mov_type == "UNKNOWN":
+            raw_data[acc_type]["UNKNOWN"]["count"] = count
+            raw_data[acc_type]["UNKNOWN"]["amount_abs_sum"] = amount_abs_sum or Decimal("0")
 
-    # Calculate cash_flow for each account_type
-    for acc_type in by_account_type:
-        by_account_type[acc_type]["cash_flow"] = (
-            by_account_type[acc_type]["total_abono"] + by_account_type[acc_type]["total_cargo"]
-        )
+    # Second pass: build final structure with derived fields (calculated once, no optimistic values)
+    by_account_type = {}
+    for acc_type, data in raw_data.items():
+        count_unknown = data["UNKNOWN"]["count"]
+
+        by_account_type[acc_type] = {
+            "total_abono": data["ABONO"]["amount_sum"],
+            "total_cargo": data["CARGO"]["amount_sum"],
+            "cash_flow": data["ABONO"]["amount_sum"] + data["CARGO"]["amount_sum"],
+            "count_abono": data["ABONO"]["count"],
+            "count_cargo": data["CARGO"]["count"],
+            "count_unknown": count_unknown,
+            "is_complete": count_unknown == 0,
+            "unknown_amount_abs_total": data["UNKNOWN"]["amount_abs_sum"],
+        }
 
     return {
         "date_range": {
