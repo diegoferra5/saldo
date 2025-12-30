@@ -154,3 +154,69 @@ class TransactionStats(BaseModel):
             }
         }
     )
+
+
+class BalanceValidationSummary(BaseModel):
+    """PDF summary data from statement"""
+    saldo_inicial: Decimal
+    saldo_final: Decimal
+    total_abonos: Decimal
+    total_cargos: Decimal  # Negative
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BalanceValidationCalculated(BaseModel):
+    """Calculated values from DB transactions"""
+    total_abonos: Decimal
+    total_cargos: Decimal  # Negative
+    expected_final: Decimal
+    calculated_final: Decimal
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BalanceValidationResult(BaseModel):
+    """Validation result"""
+    is_valid: bool
+    difference: Decimal
+    warnings: list[str]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class BalanceValidationResponse(BaseModel):
+    """Balance validation response (output)"""
+    statement_id: str
+    statement_month: str
+    summary: BalanceValidationSummary
+    calculated: BalanceValidationCalculated
+    validation: BalanceValidationResult
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "statement_id": "123e4567-e89b-12d3-a456-426614174000",
+                "statement_month": "2025-01",
+                "summary": {
+                    "saldo_inicial": 8500.00,
+                    "saldo_final": 10500.00,
+                    "total_abonos": 5000.00,
+                    "total_cargos": -3000.00
+                },
+                "calculated": {
+                    "total_abonos": 5000.00,
+                    "total_cargos": -3000.00,
+                    "expected_final": 10500.00,
+                    "calculated_final": 10500.00
+                },
+                "validation": {
+                    "is_valid": True,
+                    "difference": 0.00,
+                    "warnings": []
+                }
+            }
+        }
+    )

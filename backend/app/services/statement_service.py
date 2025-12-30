@@ -226,6 +226,9 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
 
         # Link statement to account
         statement.account_id = account.id
+
+        # Store PDF summary data for validation
+        statement.summary_data = summary
         db.flush()
 
         # Insert transactions in batch (savepoints + flush, no commit inside)

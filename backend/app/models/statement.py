@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, Date, Text, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
+from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP, JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import uuid
@@ -38,7 +38,10 @@ class Statement(Base):
     # Processing
     parsing_status = Column(String(20), nullable=False, default="pending", server_default="pending")
     error_message = Column(Text, nullable=True)
-    
+
+    # PDF Summary data (from parser)
+    summary_data = Column(JSONB, nullable=True)
+
     # Security & audit
     file_hash = Column(String(64), nullable=True)
     ip_address = Column(String(45), nullable=True)

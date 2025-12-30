@@ -398,3 +398,116 @@ def sum_transactions_by_type(user_id: UUID, db: Session) -> Dict[str, Decimal]:
         "total_abono": abono_sum,
         "net_balance": abono_sum + cargo_sum
     }
+
+
+def validate_statement_balance(
+    statement_id: UUID,
+    user_id: UUID,
+    db: Session,
+) -> Dict[str, Any]:
+    """
+    Validate that transactions match the statement PDF summary.
+
+    Compares:
+    - PDF summary (stored in statement.summary_data)
+    - Actual transaction totals in DB (current state, includes manual corrections)
+
+    Returns validation result with warnings if discrepancies > $10.
+    """
+    from app.models.statement import Statement
+
+    # Fetch statement with ownership check
+    statement = (
+        db.query(Statement)
+        .filter(Statement.id == statement_id, Statement.user_id == user_id)
+        .first()
+    )
+
+    if not statement:
+        raise ValueError(f"Statement {statement_id} not found or access denied")
+
+    # Ensure summary_data exists
+    if not statement.summary_data:
+        raise ValueError("Statement does not have summary data (was it processed successfully?)")
+
+    summary = statement.summary_data
+
+    # Calculate current transaction totals for this statement
+    cargo_sum = (
+        db.query(func.sum(Transaction.amount))
+        .filter(
+            Transaction.statement_id == statement_id,
+            Transaction.movement_type == "CARGO",
+            Transaction.amount.isnot(None)
+        )
+        .scalar()
+    ) or Decimal("0")
+
+    abono_sum = (
+        db.query(func.sum(Transaction.amount))
+        .filter(
+            Transaction.statement_id == statement_id,
+            Transaction.movement_type == "ABONO",
+            Transaction.amount.isnot(None)
+        )
+        .scalar()
+    ) or Decimal("0")
+
+    # Extract expected values from PDF summary
+    expected_abono = Decimal(str(summary.get("deposits_amount", 0)))
+    expected_cargo = Decimal(str(summary.get("charges_amount", 0)))
+    starting_balance = Decimal(str(summary.get("starting_balance", 0)))
+    final_balance = Decimal(str(summary.get("final_balance", 0)))
+
+    # Calculate final balance: starting + abono - cargo
+    calculated_final = starting_balance + abono_sum - abs(cargo_sum)
+
+    # Deltas
+    abono_diff = abono_sum - expected_abono
+    cargo_diff = abs(cargo_sum) - expected_cargo
+    balance_diff = calculated_final - final_balance
+
+    # Validation threshold ($10)
+    threshold = Decimal("10.00")
+    warnings = []
+
+    if abs(abono_diff) > threshold:
+        warnings.append(
+            f"Total abonos mismatch: expected {expected_abono:.2f}, calculated {abono_sum:.2f} (diff: {abono_diff:+.2f}). "
+            "This suggests misclassified transactions. Review ABONO transactions."
+        )
+
+    if abs(cargo_diff) > threshold:
+        warnings.append(
+            f"Total cargos mismatch: expected {expected_cargo:.2f}, calculated {abs(cargo_sum):.2f} (diff: {cargo_diff:+.2f}). "
+            "This suggests misclassified transactions. Review CARGO transactions."
+        )
+
+    if abs(balance_diff) > threshold:
+        warnings.append(
+            f"Final balance mismatch: expected {final_balance:.2f}, calculated {calculated_final:.2f} (diff: {balance_diff:+.2f})"
+        )
+
+    is_valid = len(warnings) == 0
+
+    return {
+        "statement_id": str(statement_id),
+        "statement_month": statement.statement_month.strftime("%Y-%m"),
+        "summary": {
+            "saldo_inicial": starting_balance,
+            "saldo_final": final_balance,
+            "total_abonos": expected_abono,
+            "total_cargos": -expected_cargo,  # Return as negative for consistency
+        },
+        "calculated": {
+            "total_abonos": abono_sum,
+            "total_cargos": cargo_sum,  # Already negative
+            "expected_final": final_balance,
+            "calculated_final": calculated_final,
+        },
+        "validation": {
+            "is_valid": is_valid,
+            "difference": balance_diff,
+            "warnings": warnings,
+        },
+    }

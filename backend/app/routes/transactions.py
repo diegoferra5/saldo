@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.transactions import (
+    BalanceValidationResponse,
     MovementType,
     TransactionList,
     TransactionResponse,
@@ -21,6 +22,7 @@ from app.services.transaction_service import (
     get_transactions_by_user,
     sum_transactions_by_type,
     update_transaction_classification,
+    validate_statement_balance,
 )
 
 
@@ -142,6 +144,42 @@ def get_transaction_stats(
         total_abono=sums["total_abono"],
         net_balance=sums["net_balance"],
     )
+
+
+@router.get("/validate-balance", response_model=BalanceValidationResponse)
+def validate_balance(
+    statement_id: UUID = Query(..., description="Statement ID to validate"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> BalanceValidationResponse:
+    """
+    Validate that transactions match statement PDF summary.
+
+    Compares:
+    - PDF summary (from statement.summary_data)
+    - Current transaction totals in DB (includes manual corrections)
+
+    Returns:
+    - is_valid: True if difference < $10 threshold
+    - warnings: List of discrepancies if validation fails
+
+    Use case:
+    - Call after POST /statements/{id}/process
+    - If is_valid=false, show warning banner in UI
+    - User can then review transactions with needs_review=true
+    """
+    try:
+        result = validate_statement_balance(
+            statement_id=statement_id,
+            user_id=current_user.id,
+            db=db,
+        )
+        return BalanceValidationResponse(**result)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
 
 
 @router.patch("/{id}", response_model=TransactionResponse)

@@ -1113,7 +1113,7 @@ if __name__ == "__main__":
 
     # Default test PDF (edit this path for quick testing)
     pdf_path = "/Users/diegoferra/Documents/ASTRAFIN/STATEMENTS/BBVA_debit_dic25_diego.pdf"
-    debug = False
+    debug = True
 
     if len(sys.argv) > 1 and sys.argv[1] != "--debug":
         pdf_path = sys.argv[1]
