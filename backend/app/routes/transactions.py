@@ -10,17 +10,18 @@ from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.transactions import (
     BalanceValidationResponse,
+    CashFlowStats,
+    DateRange,
     MovementType,
     TransactionList,
     TransactionResponse,
-    TransactionStats,
+    TransactionStatsResponse,
     TransactionUpdate,
 )
 from app.services.transaction_service import (
-    count_transactions_by_type,
+    get_cash_flow_stats,
     get_transaction_by_id,
     get_transactions_by_user,
-    sum_transactions_by_type,
     update_transaction_classification,
     validate_statement_balance,
 )
@@ -33,6 +34,7 @@ router = APIRouter(prefix="/api/transactions", tags=["Transactions"])
 def list_transactions(
     # Filters
     account_id: Optional[UUID] = Query(None, description="Filter by account (UUID from GET /api/accounts/)"),
+    statement_id: Optional[UUID] = Query(None, description="Filter by statement (UUID from GET /api/statements/)"),
     start_date: Optional[date] = Query(None, description="From date (YYYY-MM-DD)"),
     end_date: Optional[date] = Query(None, description="To date (YYYY-MM-DD)"),
     movement_type: Optional[MovementType] = Query(None, description="Filter by transaction type"),
@@ -49,6 +51,7 @@ def list_transactions(
 
     Filters:
     - account_id: Filter by specific account
+    - statement_id: Filter by specific statement
     - start_date: From date (YYYY-MM-DD)
     - end_date: To date (YYYY-MM-DD)
     - movement_type: CARGO | ABONO | UNKNOWN
@@ -72,6 +75,7 @@ def list_transactions(
         user_id=current_user.id,
         db=db,
         account_id=account_id,
+        statement_id=statement_id,
         start_date=start_date,
         end_date=end_date,
         movement_type=movement_type,
@@ -83,66 +87,63 @@ def list_transactions(
     return transactions
 
 
-@router.get("/{id}", response_model=TransactionResponse)
-def get_transaction(
-    id: UUID,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> TransactionResponse:
-    """
-    Get transaction details by ID.
-
-    Returns full transaction details including all fields.
-    Only returns transactions owned by the authenticated user.
-    """
-    transaction = get_transaction_by_id(
-        transaction_id=id,
-        user_id=current_user.id,
-        db=db,
-    )
-
-    if not transaction:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Transaction not found",
-        )
-
-    return transaction
-
-
-@router.get("/stats", response_model=TransactionStats)
+@router.get("/stats", response_model=TransactionStatsResponse)
 def get_transaction_stats(
+    # Filters
+    account_id: Optional[UUID] = Query(None, description="Filter by account"),
+    account_type: Optional[str] = Query(None, description="Filter by account type (debit|credit)"),
+    date_from: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
+    # Dependencies
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> TransactionStats:
+) -> TransactionStatsResponse:
     """
-    Get transaction statistics by movement type.
+    Get cash flow statistics (income - expenses).
+
+    Cash flow represents the net movement of money during a period.
+    Does NOT include account balances - only transaction flows.
+
+    Filters:
+    - account_id: Filter by specific account
+    - account_type: Filter by account type (debit | credit)
+    - date_from: Start date (YYYY-MM-DD)
+    - date_to: End date (YYYY-MM-DD)
 
     Returns:
-    - count_cargo: Number of expense transactions
-    - count_abono: Number of income transactions
-    - count_unknown: Number of unclassified transactions
-    - total_cargo: Sum of expenses (negative)
-    - total_abono: Sum of income (positive)
-    - net_balance: Net balance (total_abono + total_cargo)
+    - date_range: Period analyzed (null if no date filters)
+    - global: Overall cash flow stats with counts
+    - by_account_type: Breakdown by account type (only keys with data)
 
     Notes:
+    - cash_flow = total_abono + total_cargo (positive = surplus, negative = deficit)
+    - UNKNOWN transactions are counted but excluded from totals (amount=None)
     - Reflects current DB state (includes manual corrections via PATCH)
-    - UNKNOWN transactions are excluded from totals (amount=None)
     """
-    # Get counts by type
-    counts = count_transactions_by_type(user_id=current_user.id, db=db)
+    # Validate date range
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="date_from must be less than or equal to date_to",
+        )
 
-    # Get sums by type
-    sums = sum_transactions_by_type(user_id=current_user.id, db=db)
+    # Get cash flow stats
+    result = get_cash_flow_stats(
+        user_id=current_user.id,
+        db=db,
+        account_id=account_id,
+        account_type=account_type,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
-    return TransactionStats(
-        count_cargo=counts.get("CARGO", 0),
-        count_abono=counts.get("ABONO", 0),
-        count_unknown=counts.get("UNKNOWN", 0),
-        total_cargo=sums["total_cargo"],
-        total_abono=sums["total_abono"],
-        net_balance=sums["net_balance"],
+    # Construct response using new schemas
+    return TransactionStatsResponse(
+        date_range=DateRange(start=result["date_range"]["from"], end=result["date_range"]["to"]),
+        global_stats=CashFlowStats(**result["global"]),
+        by_account_type={
+            k: CashFlowStats(**v) for k, v in result["by_account_type"].items()
+        }
     )
 
 
@@ -180,6 +181,33 @@ def validate_balance(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
+
+
+@router.get("/{id}", response_model=TransactionResponse)
+def get_transaction(
+    id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> TransactionResponse:
+    """
+    Get transaction details by ID.
+
+    Returns full transaction details including all fields.
+    Only returns transactions owned by the authenticated user.
+    """
+    transaction = get_transaction_by_id(
+        transaction_id=id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found",
+        )
+
+    return transaction
 
 
 @router.patch("/{id}", response_model=TransactionResponse)

@@ -231,6 +231,7 @@ def get_transactions_by_user(
     user_id: UUID,
     db: Session,
     account_id: Optional[UUID] = None,
+    statement_id: Optional[UUID] = None,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     movement_type: Optional[MovementType] = None,
@@ -251,6 +252,9 @@ def get_transactions_by_user(
 
     if account_id is not None:
         q = q.filter(Transaction.account_id == account_id)
+
+    if statement_id is not None:
+        q = q.filter(Transaction.statement_id == statement_id)
 
     if start_date is not None:
         q = q.filter(Transaction.transaction_date >= start_date)
@@ -357,6 +361,7 @@ def get_transaction_by_id(
 def sum_transactions_by_type(user_id: UUID, db: Session) -> Dict[str, Decimal]:
     """
     Sum transaction amounts grouped by movement_type.
+    DEPRECATED: Use get_cash_flow_stats() instead.
 
     Returns:
         {
@@ -397,6 +402,158 @@ def sum_transactions_by_type(user_id: UUID, db: Session) -> Dict[str, Decimal]:
         "total_cargo": cargo_sum,
         "total_abono": abono_sum,
         "net_balance": abono_sum + cargo_sum
+    }
+
+
+def get_cash_flow_stats(
+    user_id: UUID,
+    db: Session,
+    account_id: Optional[UUID] = None,
+    account_type: Optional[str] = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> Dict[str, Any]:
+    """
+    Get cash flow statistics with optional filters.
+
+    Returns cash flow (income - expenses) grouped by account_type.
+    Does NOT include balances - only transaction flows.
+
+    Args:
+        user_id: User ID (required)
+        account_id: Filter by specific account (optional)
+        account_type: Filter by account type "debit" | "credit" (optional)
+        date_from: Start date (optional)
+        date_to: End date (optional)
+
+    Returns:
+        {
+            "date_range": {"from": date | None, "to": date | None},
+            "global": {
+                "total_abono": Decimal,
+                "total_cargo": Decimal,
+                "cash_flow": Decimal,
+                "count_abono": int,
+                "count_cargo": int,
+                "count_unknown": int
+            },
+            "by_account_type": {
+                "debit": {...},
+                "credit": {...}
+            }
+        }
+    """
+    from app.models.account import Account
+
+    # Build base query with JOIN to accounts for account_type
+    base_query = db.query(Transaction).join(Account, Transaction.account_id == Account.id)
+
+    # Apply filters
+    base_query = base_query.filter(Transaction.user_id == user_id)
+
+    if account_id is not None:
+        base_query = base_query.filter(Transaction.account_id == account_id)
+
+    if account_type is not None:
+        base_query = base_query.filter(Account.account_type == account_type)
+
+    if date_from is not None:
+        base_query = base_query.filter(Transaction.transaction_date >= date_from)
+
+    if date_to is not None:
+        base_query = base_query.filter(Transaction.transaction_date <= date_to)
+
+    # GLOBAL STATS (all filtered transactions)
+    # Counts
+    count_cargo = base_query.filter(Transaction.movement_type == "CARGO").count()
+    count_abono = base_query.filter(Transaction.movement_type == "ABONO").count()
+    count_unknown = base_query.filter(Transaction.movement_type == "UNKNOWN").count()
+
+    # Sums (UNKNOWN excluded since amount=None)
+    cargo_sum = (
+        base_query
+        .filter(Transaction.movement_type == "CARGO", Transaction.amount.isnot(None))
+        .with_entities(func.sum(Transaction.amount))
+        .scalar()
+    ) or Decimal("0")
+
+    abono_sum = (
+        base_query
+        .filter(Transaction.movement_type == "ABONO", Transaction.amount.isnot(None))
+        .with_entities(func.sum(Transaction.amount))
+        .scalar()
+    ) or Decimal("0")
+
+    global_stats = {
+        "total_abono": abono_sum,
+        "total_cargo": cargo_sum,
+        "cash_flow": abono_sum + cargo_sum,
+        "count_abono": count_abono,
+        "count_cargo": count_cargo,
+        "count_unknown": count_unknown,
+    }
+
+    # BY ACCOUNT TYPE (group by account_type)
+    by_account_type = {}
+
+    # Query grouped by account_type
+    grouped_query = (
+        db.query(
+            Account.account_type,
+            Transaction.movement_type,
+            func.sum(Transaction.amount).label("total")
+        )
+        .join(Account, Transaction.account_id == Account.id)
+        .filter(
+            Transaction.user_id == user_id,
+            Transaction.amount.isnot(None)  # Exclude UNKNOWN
+        )
+    )
+
+    # Apply same filters
+    if account_id is not None:
+        grouped_query = grouped_query.filter(Transaction.account_id == account_id)
+
+    if account_type is not None:
+        grouped_query = grouped_query.filter(Account.account_type == account_type)
+
+    if date_from is not None:
+        grouped_query = grouped_query.filter(Transaction.transaction_date >= date_from)
+
+    if date_to is not None:
+        grouped_query = grouped_query.filter(Transaction.transaction_date <= date_to)
+
+    grouped_query = grouped_query.group_by(Account.account_type, Transaction.movement_type)
+
+    results = grouped_query.all()
+
+    # Process results
+    for acc_type, mov_type, total in results:
+        if acc_type not in by_account_type:
+            by_account_type[acc_type] = {
+                "total_abono": Decimal("0"),
+                "total_cargo": Decimal("0"),
+                "cash_flow": Decimal("0"),
+            }
+
+        if mov_type == "ABONO":
+            by_account_type[acc_type]["total_abono"] = total or Decimal("0")
+        elif mov_type == "CARGO":
+            by_account_type[acc_type]["total_cargo"] = total or Decimal("0")
+
+    # Calculate cash_flow for each account_type
+    for acc_type in by_account_type:
+        by_account_type[acc_type]["cash_flow"] = (
+            by_account_type[acc_type]["total_abono"] + by_account_type[acc_type]["total_cargo"]
+        )
+
+    return {
+        "date_range": {
+            "from": date_from,
+            "to": date_to,
+        },
+        "global": global_stats,
+        "by_account_type": by_account_type,
     }
 
 

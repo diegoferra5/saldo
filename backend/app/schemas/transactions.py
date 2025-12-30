@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, model_validator
 from datetime import date as DateType, datetime
-from typing import Optional
+from typing import Optional, Dict
 from uuid import UUID
 from decimal import Decimal
 from enum import Enum
@@ -131,8 +131,92 @@ class TransactionUpdate(BaseModel):
     )
 
 
+class DateRange(BaseModel):
+    """Date range for stats query"""
+    start: Optional[DateType] = None  # "from" in JSON, but "from" is Python keyword
+    end: Optional[DateType] = None    # "to" in JSON
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,  # Allow both field name and alias
+    )
+
+    # Use field aliases to map Python names to JSON keys
+    @classmethod
+    def model_json_schema(cls, **kwargs):
+        schema = super().model_json_schema(**kwargs)
+        # Rename fields in schema
+        if 'properties' in schema:
+            schema['properties']['from'] = schema['properties'].pop('start')
+            schema['properties']['to'] = schema['properties'].pop('end')
+        return schema
+
+
+class CashFlowStats(BaseModel):
+    """Cash flow statistics (income - expenses)"""
+    total_abono: Decimal   # Positive (income)
+    total_cargo: Decimal   # Negative (expenses)
+    cash_flow: Decimal     # total_abono + total_cargo
+    count_abono: Optional[int] = None  # Only in global stats
+    count_cargo: Optional[int] = None  # Only in global stats
+    count_unknown: Optional[int] = None  # Only in global stats
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+    )
+
+
+class TransactionStatsResponse(BaseModel):
+    """Cash flow statistics response (v2)"""
+    date_range: DateRange
+    global_stats: CashFlowStats  # "global" in JSON
+    by_account_type: Dict[str, CashFlowStats]
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "date_range": {
+                    "from": "2025-11-11",
+                    "to": "2025-12-10"
+                },
+                "global": {
+                    "total_abono": "47856.22",
+                    "total_cargo": "-56862.50",
+                    "cash_flow": "-9006.28",
+                    "count_abono": 17,
+                    "count_cargo": 17,
+                    "count_unknown": 0
+                },
+                "by_account_type": {
+                    "debit": {
+                        "total_abono": "47856.22",
+                        "total_cargo": "-56862.50",
+                        "cash_flow": "-9006.28"
+                    },
+                    "credit": {
+                        "total_abono": "0.00",
+                        "total_cargo": "0.00",
+                        "cash_flow": "0.00"
+                    }
+                }
+            }
+        }
+    )
+
+    @classmethod
+    def model_json_schema(cls, **kwargs):
+        schema = super().model_json_schema(**kwargs)
+        # Rename global_stats to "global" in schema
+        if 'properties' in schema:
+            schema['properties']['global'] = schema['properties'].pop('global_stats')
+        return schema
+
+
+# Legacy schema - kept for backward compatibility (if needed)
 class TransactionStats(BaseModel):
-    """Transaction statistics by type (output)"""
+    """Transaction statistics by type (output) - DEPRECATED: Use TransactionStatsResponse"""
     count_cargo: int
     count_abono: int
     count_unknown: int
