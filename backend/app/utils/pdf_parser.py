@@ -17,13 +17,39 @@ def _extract_last_money(line: str) -> Optional[float]:
 def _extract_count_and_last_money(line: str) -> tuple[Optional[int], Optional[float]]:
     """
     Extract count (int) and LAST money amount from summary lines.
-    Works well for BBVA lines like: 'Depósitos / Abonos 17 47,856.22'
-    """
-    # Count: first standalone integer
-    count_match = re.search(r'\b(\d+)\b', line)
-    count = int(count_match.group(1)) if count_match else None
+    Works for BBVA lines like: 'Días del Periodo 30 Depósitos / Abonos (+) 17 47,856.22'
 
+    Strategy: Find the LAST integer that appears immediately BEFORE the money amount.
+    This correctly extracts 17 (not 30 or 22) from the example above.
+    """
+    # Extract the last money amount first
     amount = _extract_last_money(line)
+
+    if amount is None:
+        return None, None
+
+    # Find the position of the money amount in the line
+    # Match patterns like "47,856.22" or "47856.22"
+    money_pattern = r'[\d,]+\.\d{2}'
+    money_match = None
+    for match in re.finditer(money_pattern, line):
+        money_match = match  # Keep updating to get the last match
+
+    if not money_match:
+        return None, amount
+
+    # Get the substring before the money amount
+    text_before_money = line[:money_match.start()]
+
+    # Find all integers in the text before the money amount
+    integers = [int(match.group(0)) for match in re.finditer(r'\b(\d+)\b', text_before_money)]
+
+    if not integers:
+        return None, amount
+
+    # The count is the LAST integer before the money amount
+    count = integers[-1]
+
     return count, amount
 
 # Type definitions for transaction structure
@@ -407,6 +433,7 @@ def extract_statement_summary(pdf_path: str) -> SummaryDict:
     except Exception as e:
         raise Exception(f"Error reading PDF: {str(e)}")
 
+    # Required fields for validation (n_deposits and n_charges are optional - may parse incorrectly)
     required_keys = ["starting_balance", "deposits_amount", "charges_amount", "final_balance"]
     missing_keys = [key for key in required_keys if key not in summary]
 
@@ -1132,4 +1159,6 @@ if __name__ == "__main__":
         print(f"Deposits: {s['deposits_amount']:.2f}")
         print(f"Charges: {s['charges_amount']:.2f}")
         print(f"Final balance: {s['final_balance']:.2f}")
+        print(f"Number of deposits: {s['n_deposits']}")
+        print(f"Number of charges: {s['n_charges']}")
 
