@@ -79,13 +79,16 @@ def get_or_create_account(
     bank_name: str,
     account_type: str,
     display_name: Optional[str] = None,
-) -> Account:
+) -> tuple[Account, bool]:
     """
     Get an existing account (by user_id + bank_name + account_type), or create it.
 
     MVP behavior:
     - Only DEBIT/CREDIT allowed
     - If account exists but is inactive, reactivate it
+
+    Returns:
+        tuple[Account, bool]: (account, created) where created=True if newly created
     """
     bn = _normalize_bank_name(bank_name)
     at = _normalize_account_type(account_type)
@@ -108,7 +111,7 @@ def get_or_create_account(
         if display_name and not account.display_name:
             account.display_name = display_name.strip()
         db.flush()
-        return account
+        return (account, False)  # Existing account
 
     new_account = Account(
         user_id=user_id,
@@ -121,7 +124,7 @@ def get_or_create_account(
     try:
         db.add(new_account)
         db.flush()  # ensure new_account.id exists without committing
-        return new_account
+        return (new_account, True)  # Created
     except IntegrityError:
         # Handle race condition if another request created it at the same time
         db.rollback()
@@ -136,7 +139,7 @@ def get_or_create_account(
         )
         if not existing:
             raise HTTPException(status_code=500, detail="Failed to create account")
-        return existing
+        return (existing, False)  # Existing (race condition)
 
 
 def update_account(

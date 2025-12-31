@@ -70,14 +70,7 @@ def create_account(
     Security:
     - Only creates accounts for authenticated user (current_user.id)
     """
-    # Check if account already exists before calling get_or_create
-    existing_account = db.query(Account).filter(
-        Account.user_id == current_user.id,
-        Account.bank_name == account_data.bank_name.strip(),
-        Account.account_type == account_data.account_type.value.upper()
-    ).first()
-
-    account = account_service.get_or_create_account(
+    account, created = account_service.get_or_create_account(
         db=db,
         user_id=current_user.id,
         bank_name=account_data.bank_name,
@@ -88,11 +81,8 @@ def create_account(
     db.commit()
     db.refresh(account)
 
-    # Set appropriate status code
-    if existing_account is None:
-        response.status_code = 201  # Created
-    else:
-        response.status_code = 200  # OK (already existed)
+    # Set appropriate status code based on whether account was created
+    response.status_code = 201 if created else 200
 
     return account
 
@@ -168,3 +158,37 @@ def update_account(
     )
 
     return account
+
+
+@router.delete("/{account_id}", status_code=204)
+def delete_account(
+    account_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Soft-delete account (sets is_active=false).
+
+    Preserves all historical data (statements, transactions).
+    Idempotent: returns 204 even if account is already inactive.
+
+    Path parameters:
+    - account_id: UUID of the account to delete
+
+    Returns:
+    - 204 No Content on success
+    - 404 Not Found if account doesn't exist or doesn't belong to user
+
+    Security:
+    - Only owner can delete their accounts
+    - Returns 404 (not 403) to avoid leaking existence of accounts
+
+    Note: This is a soft delete. Use PATCH to reactivate (is_active=true).
+    """
+    account_service.deactivate_account(
+        db=db,
+        account_id=account_id,
+        user_id=current_user.id
+    )
+
+    return None

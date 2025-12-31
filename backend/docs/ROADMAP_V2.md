@@ -1,8 +1,8 @@
-# 🗺️ Saldo Backend V2 - Roadmap MVP Final
+# 🗺️ Saldo Backend - Roadmap MVP Final
 
-> **Versión:** 2.0 (Updated after cash flow stats + reconciliation implementation)
+> **Versión:** 3.0 (Updated after Accounts Router implementation)
 > **Branch actual:** `feature/transactions-account-endpoints`
-> **Última actualización:** 2025-12-30
+> **Última actualización:** 2025-12-31
 > **Filosofía:** Production-ready, audit-able, semantic consistency over quick hacks
 
 ---
@@ -36,8 +36,13 @@
 - ✅ Transaction Service (deduplicación por hash + occurrence_index)
 
 **Accounts:**
-- ✅ Account Service (get-or-create pattern) - Service layer completo
-- ❌ **Accounts Router PENDIENTE** - `/api/accounts/*` NO implementado aún
+- ✅ Account Service (get-or-create pattern with tuple return)
+- ✅ **Accounts Router (`/api/accounts/*`)** - 5 endpoints implementados:
+  - ✅ GET / - List with filters (bank_name, account_type, is_active)
+  - ✅ POST / - Create account (get-or-create with 201/200 status codes)
+  - ✅ GET /{id} - Get account details
+  - ✅ PATCH /{id} - Update display_name/is_active
+  - ✅ DELETE /{id} - Soft delete (idempotent, returns 204)
 
 ---
 
@@ -45,24 +50,7 @@
 
 ### 🔴 Critical (Bloqueantes para MVP)
 
-**1. Accounts Router (4 horas)** ⭐ PRIORITARIO
-- [ ] Crear `app/routes/accounts.py`
-- [ ] Implementar 5 endpoints:
-  - `GET /api/accounts/` - List with filters (bank_name, account_type, is_active)
-  - `POST /api/accounts/` - Create account (get-or-create pattern)
-  - `GET /api/accounts/{id}` - Get account details
-  - `PATCH /api/accounts/{id}` - Update display_name/is_active
-  - `DELETE /api/accounts/{id}` - Soft delete (is_active=False)
-- [ ] Crear `app/schemas/account.py` (AccountResponse, AccountCreate, AccountUpdate)
-- [ ] Registrar router en `main.py`
-- **DoD:**
-  - 5 endpoints funcionando en Swagger
-  - Soft delete idempotente
-  - Ownership checks implementados
-  - Normalización de bank_name (uppercase)
-  - Testing manual completado
-
-**2. PDF Cleanup + Logging (30 min)**
+**1. PDF Cleanup + Logging (30 min)**
 - [ ] Configurar logging en `main.py`
 - [ ] Auto-delete PDFs después de `parsing_status=success`
 - [ ] Logger profesional (reemplazar `print()` statements)
@@ -71,7 +59,7 @@
   - PDFs borrados automáticamente tras procesamiento exitoso
   - Fallos de delete logueados como warnings (no crash)
 
-**2. Testing Manual Exhaustivo (2 horas)**
+**2. Testing Manual Exhaustivo (2 horas)** ⭐ PRIORITARIO
 - [ ] Swagger testing de TODOS los endpoints
 - [ ] Edge cases documentados en checklist
 - [ ] Security testing (ownership checks)
@@ -173,53 +161,58 @@
 - [ ] PATCH /{id} - movement_type=UNKNOWN → needs_review=True auto
 - [ ] PATCH /{id} - Transaction de otro user → 404
 
-### Accounts (`/api/accounts/`)
-- [ ] POST / - Nueva cuenta → created
-- [ ] POST / - Cuenta duplicada (bank+type) → retorna existente
-- [ ] GET / - Lista cuentas del user
+### Accounts (`/api/accounts/`) ⭐ NEW
+- [ ] POST / - Nueva cuenta → 201 Created
+- [ ] POST / - Cuenta duplicada (bank+type) → 200 OK (retorna existente)
+- [ ] POST / - Cuenta inactiva duplicada → reactivada + 200 OK
+- [ ] GET / - Lista cuentas del user (default is_active=true)
 - [ ] GET /?is_active=false → solo inactivas
+- [ ] GET /?bank_name=BBVA → filtradas por banco
 - [ ] GET /{id} - Cuenta válida → details
 - [ ] GET /{id} - Cuenta de otro user → 404
 - [ ] PATCH /{id} - display_name actualizado
 - [ ] PATCH /{id} - is_active=false → desactivada
-- [ ] DELETE /{id} - Cuenta soft deleted (is_active=False)
+- [ ] PATCH /{id} - Solo display_name (is_active omitido) → OK
+- [ ] DELETE /{id} - Cuenta soft deleted (is_active=False) → 204
 - [ ] DELETE /{id} - DELETE idempotente (ya inactiva) → 204 OK
 
 ---
 
-## 🚀 Sprint Final para MVP (6-7 días)
+## 🚀 Sprint Final para MVP (3-4 días)
 
-### Día 1-2: Accounts Router (4 horas) 🔴 BLOQUEANTE
-- [ ] Crear `app/schemas/account.py`
-- [ ] Crear `app/routes/accounts.py` con 5 endpoints
-- [ ] Registrar router en `main.py`
-- [ ] Testing básico en Swagger
+### ✅ Completado: Accounts Router (31 dic 2025)
+- ✅ Creado `app/schemas/account.py` (AccountCreate, AccountUpdate, AccountResponse, AccountList)
+- ✅ Creado `app/routes/account.py` con 5 endpoints
+- ✅ Refactorizado `get_or_create_account()` → retorna `tuple[Account, bool]`
+- ✅ DELETE endpoint implementado (soft delete idempotente)
+- ✅ POST endpoint con 201/200 diferenciado
+- ✅ Registrado router en `main.py`
 
-### Día 3: Cleanup + Logging (2 horas)
+### Día 1: Cleanup + Logging (2 horas)
 - [ ] Implementar PDF auto-delete
 - [ ] Configurar logging profesional
 - [ ] Reemplazar print() statements
 - [ ] Testing básico
 
-### Día 4: Testing Exhaustivo (4 horas)
+### Día 2: Testing Exhaustivo (4 horas)
 - [ ] Ejecutar checklist completo en Swagger (incluye accounts)
 - [ ] Documentar edge cases encontrados
 - [ ] Corregir bugs críticos
 - [ ] Screenshots para docs
 
-### Día 5: Documentation (3 horas)
+### Día 3: Documentation (3 horas)
 - [ ] Actualizar README.md
 - [ ] Documentar env vars
 - [ ] Ejemplos de endpoints (incluir accounts)
 - [ ] Setup instructions
 
-### Día 6: Seed Script + Error Handling (3 horas)
+### Día 4 (Opcional): Seed Script + Error Handling (3 horas)
 - [ ] Implementar seed_demo_data.py (incluir accounts)
 - [ ] Crear ErrorResponse schema
 - [ ] Testing del seed script
 - [ ] Documentar en README
 
-### Día 7: Final Polish (2 horas)
+### Final: Polish & Merge (2 horas)
 - [ ] Code review final
 - [ ] Smoke tests end-to-end
 - [ ] Git commit + push
@@ -238,7 +231,7 @@
 - ✅ Usuario valida balance (detecta errores de clasificación)
 - ✅ Usuario reconcilia statement (PDF vs DB)
 - ✅ Usuario obtiene cash flow stats con data quality flags
-- ❌ **Usuario gestiona cuentas (CRUD)** - PENDIENTE (accounts router)
+- ✅ **Usuario gestiona cuentas (CRUD)** - Accounts router completo
 
 **Quality:**
 - [ ] Logging profesional configurado
@@ -266,26 +259,26 @@
 
 | Task | Horas | Prioridad | Status |
 |------|-------|-----------|--------|
-| **Accounts Router** | **4** | **🔴 Critical** | **Pending** |
+| **Accounts Router** | **4** | **🔴 Critical** | **✅ Done** |
 | PDF Cleanup + Logging | 0.5 | 🔴 Critical | Pending |
 | Testing Manual Exhaustivo | 2 | 🔴 Critical | Pending |
 | README Update | 1 | 🔴 Critical | Pending |
-| Seed Script | 2 | 🟡 High | Pending |
-| Error Handling | 1 | 🟡 High | Pending |
+| Seed Script | 2 | 🟡 High | Optional |
+| Error Handling | 1 | 🟡 High | Optional |
 | **Buffer (fixes + polish)** | **1.5** | - | - |
-| **TOTAL MVP** | **12 hrs** | **~1.5 semanas part-time** | - |
+| **TOTAL MVP** | **8 hrs restantes** | **~3-4 días part-time** | - |
 
 ---
 
 ## 🎯 Próximos Pasos Inmediatos
 
-1. 🔴 **AHORA:** Implementar Accounts Router (4 horas) - BLOQUEANTE
-2. ✅ PDF Cleanup + Logging (30 min)
-3. ✅ Testing básico de accounts + cleanup (30 min)
-4. ✅ Testing manual exhaustivo (2 horas - usar checklist completo)
-5. ✅ README update (1 hora)
-6. ✅ Seed script (2 horas)
-7. ✅ Error handling (1 hora)
+1. ✅ **Accounts Router completado** (31 dic 2025)
+2. 🔴 **AHORA:** Git commit + push de accounts router (5 min)
+3. 🔴 PDF Cleanup + Logging (30 min)
+4. 🔴 Testing manual exhaustivo (2 horas - usar checklist completo)
+5. 🔴 README update (1 hora)
+6. 🟡 Seed script (opcional - 2 horas)
+7. 🟡 Error handling (opcional - 1 hora)
 8. ✅ Final testing + polish
 9. ✅ Commit + push + PR
 10. 🚀 **Merge a main + Deploy MVP**
@@ -314,9 +307,12 @@
 - `GET /api/transactions/{id}` - Get transaction
 - `PATCH /api/transactions/{id}` - Update classification
 
-### Accounts
-- ❌ **PENDIENTE** - `/api/accounts/*` router NO implementado aún
-- ⚠️ Service layer existe (`account_service.py`) pero falta router
+### Accounts ⭐ NEW
+- ✅ `GET /api/accounts/` - List with filters
+- ✅ `POST /api/accounts/` - Create (get-or-create with 201/200)
+- ✅ `GET /api/accounts/{id}` - Get account details
+- ✅ `PATCH /api/accounts/{id}` - Update display_name/is_active
+- ✅ `DELETE /api/accounts/{id}` - Soft delete (204)
 
 ---
 
@@ -333,32 +329,35 @@
 
 ---
 
-## 📝 Notas de Cambios V1 → V2
+## 📝 Changelog
 
-**Qué cambió desde ROADMAP_V1:**
-1. ✅ `/transactions/stats` refactorizado completamente:
-   - Ahora retorna cash flow breakdown por account_type
-   - Incluye `is_complete` y `unknown_amount_abs_total`
-   - Acepta filtros: `statement_id`, `account_id`, `account_type`, `date_from`, `date_to`
-   - Schemas corregidos (counts son `int`, no `Optional[int]`)
-   - Query consolidada con CASE WHEN (performance)
+### V3.0 (31 dic 2025) - Accounts Router Complete
+**Completado:**
+1. ✅ **Accounts Router implementado** (`/api/accounts/*`):
+   - 5 endpoints CRUD completos
+   - Soft delete idempotente (DELETE → 204)
+   - POST con status codes semánticos (201 Created / 200 OK)
+   - Ownership checks + filtros
+   - Schema: AccountCreate, AccountUpdate, AccountResponse, AccountList
 
-2. ✅ `/statements/{id}/health` endpoint agregado:
-   - Reconciliación DB vs PDF summary
-   - Warnings: `NO_SUMMARY_DATA`, `INCOMPLETE_DUE_TO_UNKNOWN`
-   - Threshold fijo MVP: 10.00
+2. ✅ **Service layer refactorizado**:
+   - `get_or_create_account()` → retorna `tuple[Account, bool]`
+   - Elimina doble query en POST endpoint
+   - `statement_service.py` actualizado para usar tuple
 
-3. ✅ Statement `summary_data` JSONB field agregado
-   - Guarda output del parser (deposits_amount, charges_amount, etc.)
-   - Usado por `/health` endpoint para reconciliación
+**Decisiones técnicas:**
+- DELETE implementado (vs solo PATCH is_active) para mejor UX
+- 201/200 diferenciados en POST (vs siempre 201)
+- No hard delete (soft delete preserva datos históricos)
+- `is_active` agregado a AccountUpdate schema
 
-4. ✅ Business decisions documentadas (ver `docs/business-decisions.md`)
+### V2.0 (30 dic 2025) - Stats & Reconciliation
+1. ✅ `/transactions/stats` refactorizado (cash flow + data quality)
+2. ✅ `/statements/{id}/health` agregado (reconciliación)
+3. ✅ Statement `summary_data` JSONB field
 
-**Qué falta (ajustado desde V1):**
-- ❌ **Accounts Router** - Service layer existe pero falta implementar router (4 horas)
-- PDF cleanup (estaba marcado como pendiente, sigue pendiente)
-- Testing manual exhaustivo (con nuevo checklist actualizado incluyendo accounts)
-- Seed script (prioridad aumentada - muy útil para demos)
+### V1.0 - Foundation
+- Statements, Transactions, Auth routers completos
 
 ---
 

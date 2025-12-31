@@ -220,7 +220,7 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
             raise ValueError("Failed to extract statement summary from PDF")
 
         # Ensure Account exists (get or create)
-        account = get_or_create_account(
+        account, _ = get_or_create_account(
             db=db,
             user_id=statement.user_id,
             bank_name=statement.bank_name,
