@@ -14,11 +14,11 @@ router = APIRouter(prefix="/api/statements", tags=["Statements"])
 
 
 @router.post("/upload", response_model=StatementResponse, status_code=201)
-async def upload_statement(
+def upload_statement(
     file: UploadFile = File(..., description="PDF statement file"),
     bank_name: str = Form(..., description="Bank name (BBVA, Santander, etc.)"),
     account_type: Literal["debit", "credit", "investment"] = Form(
-        default="debit", 
+        default="debit",
         description="Account type: debit, credit, investment"
     ),
     statement_month: date = Form(..., description="Statement month (YYYY-MM-DD)"),
@@ -81,7 +81,7 @@ async def upload_statement(
 
 
 @router.get("/", response_model=List[StatementList])
-async def list_statements(
+def list_statements(
     bank_name: Optional[str] = None,
     account_type: Optional[str] = None,
     current_user: User = Depends(get_current_user),
@@ -107,7 +107,7 @@ async def list_statements(
 
 
 @router.get("/{statement_id}/health", response_model=StatementHealthResponse)
-async def get_statement_health(
+def get_statement_health(
     statement_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -141,7 +141,7 @@ async def get_statement_health(
 
 
 @router.get("/{statement_id}", response_model=StatementResponse)
-async def get_statement(
+def get_statement(
     statement_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -161,7 +161,7 @@ async def get_statement(
 
 
 @router.delete("/{statement_id}", status_code=204)
-async def delete_statement(
+def delete_statement(
     statement_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)

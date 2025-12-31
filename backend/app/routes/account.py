@@ -14,7 +14,7 @@ from app.services import account_service
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
 
 @router.get("/", response_model=List[AccountList], status_code=200)
-async def get_accounts_list(
+def get_accounts_list(
     bank_name: Optional[str] = Query(default=None, description="Filter by bank name"),
     account_type: Optional[str] = Query(default=None, description="Filter by account type (DEBIT/CREDIT)"),
     is_active: Optional[bool] = Query(default=True, description="Filter by active status"),
@@ -43,7 +43,7 @@ async def get_accounts_list(
 
 
 @router.post("/", response_model=AccountResponse)
-async def create_account(
+def create_account(
     account_data: AccountCreate,
     response: Response,
     current_user: User = Depends(get_current_user),
@@ -98,7 +98,7 @@ async def create_account(
 
 
 @router.get("/{account_id}", response_model=AccountResponse, status_code=200)
-async def get_account(
+def get_account(
     account_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
