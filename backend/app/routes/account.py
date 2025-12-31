@@ -1,13 +1,14 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 from typing import Optional, List
-from datetime import date 
+from datetime import date
 from uuid import UUID
 
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.account import AccountList, AccountType, AccountResponse
+from app.models.account import Account
+from app.schemas.account import AccountList, AccountType, AccountResponse, AccountCreate
 from app.services import account_service
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
@@ -39,3 +40,58 @@ async def get_accounts_list(
     )
 
     return accounts
+
+
+@router.post("/", response_model=AccountResponse)
+async def create_account(
+    account_data: AccountCreate,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new account or return existing one (get-or-create pattern).
+
+    Behavior:
+    - If account exists (same bank_name + account_type), returns existing account
+    - If account exists but is_active=False, reactivates it and returns
+    - If account doesn't exist, creates new account
+    - All accounts are scoped to the authenticated user
+
+    Request body:
+    - bank_name: Bank name (e.g., "BBVA", "Santander")
+    - account_type: Account type (DEBIT or CREDIT)
+    - display_name: Optional friendly name (e.g., "Mi cuenta principal")
+
+    Returns:
+    - 201 Created if account was created
+    - 200 OK if account already existed
+
+    Security:
+    - Only creates accounts for authenticated user (current_user.id)
+    """
+    # Check if account already exists before calling get_or_create
+    existing_account = db.query(Account).filter(
+        Account.user_id == current_user.id,
+        Account.bank_name == account_data.bank_name.strip(),
+        Account.account_type == account_data.account_type.value.upper()
+    ).first()
+
+    account = account_service.get_or_create_account(
+        db=db,
+        user_id=current_user.id,
+        bank_name=account_data.bank_name,
+        account_type=account_data.account_type.value,  # Convert Enum to string
+        display_name=account_data.display_name
+    )
+
+    db.commit()
+    db.refresh(account)
+
+    # Set appropriate status code
+    if existing_account is None:
+        response.status_code = 201  # Created
+    else:
+        response.status_code = 200  # OK (already existed)
+
+    return account
