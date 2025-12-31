@@ -95,3 +95,34 @@ async def create_account(
         response.status_code = 200  # OK (already existed)
 
     return account
+
+
+@router.get("/{account_id}", response_model=AccountResponse, status_code=200)
+async def get_account(
+    account_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific account by ID.
+
+    Returns account details if it belongs to the authenticated user.
+
+    Path parameters:
+    - account_id: UUID of the account to retrieve
+
+    Returns:
+    - 200 OK with account details
+    - 404 Not Found if account doesn't exist or doesn't belong to user
+
+    Security:
+    - Only returns account if it belongs to authenticated user
+    - Returns 404 (not 403) to avoid leaking existence of accounts
+    """
+    account = account_service.get_account_by_id(
+        db=db,
+        account_id=account_id,
+        user_id=current_user.id
+    )
+
+    return account
