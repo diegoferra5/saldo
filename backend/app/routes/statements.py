@@ -57,7 +57,7 @@ async def upload_statement(
     # Save file temporarily and get metadata
     file_path, file_size_kb, file_content, safe_filename = statement_service.save_file_temporarily(
         file=file,
-        user_id=str(current_user.id)
+        user_id=current_user.id
     )
     
     # Calculate file hash for duplicate detection
@@ -67,7 +67,7 @@ async def upload_statement(
     # SECURITY: Use current_user.id from JWT, NOT from request params
     statement = statement_service.create_statement_record(
         db=db,
-        user_id=str(current_user.id),  # From authenticated user
+        user_id=current_user.id,  # From authenticated user
         bank_name=bank_name,
         account_type=account_type,
         statement_month=statement_month,
@@ -98,7 +98,7 @@ async def list_statements(
     """
     statements = statement_service.get_user_statements(
         db=db,
-        user_id=str(current_user.id),
+        user_id=current_user.id,
         bank_name=bank_name,
         account_type=account_type
     )
@@ -154,7 +154,7 @@ async def get_statement(
     statement = statement_service.get_statement_by_id(
         db=db,
         statement_id=str(statement_id),
-        user_id=str(current_user.id)
+        user_id=current_user.id
     )
     
     return statement
@@ -174,7 +174,7 @@ async def delete_statement(
     statement_service.delete_statement(
         db=db,
         statement_id=str(statement_id),
-        user_id=str(current_user.id)
+        user_id=current_user.id
     )
     
     # 204 No Content - successful deletion
