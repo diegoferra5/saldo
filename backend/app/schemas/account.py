@@ -51,6 +51,7 @@ class AccountUpdate(BaseModel):
     bank_name: Optional[str] = Field(default=None, min_length=2, max_length=50)
     account_type: Optional[AccountType] = None
     display_name: Optional[str] = Field(default=None, max_length=100)
+    is_active: Optional[bool] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -66,7 +67,8 @@ class AccountUpdate(BaseModel):
 
     @model_validator(mode="after")
     def check_at_least_one_field(self):
-        if self.bank_name is None and self.account_type is None and self.display_name is None:
+        if (self.bank_name is None and self.account_type is None and
+            self.display_name is None and self.is_active is None):
             raise ValueError("At least one field must be provided for update")
         return self
 

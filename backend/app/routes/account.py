@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.account import Account
-from app.schemas.account import AccountList, AccountType, AccountResponse, AccountCreate
+from app.schemas.account import AccountList, AccountType, AccountResponse, AccountCreate, AccountUpdate
 from app.services import account_service
 
 router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
@@ -123,6 +123,48 @@ def get_account(
         db=db,
         account_id=account_id,
         user_id=current_user.id
+    )
+
+    return account
+
+
+@router.patch("/{account_id}", response_model=AccountResponse, status_code=200)
+def update_account(
+    account_id: UUID,
+    update_data: AccountUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update account details (partial update).
+
+    Allows updating:
+    - display_name: Friendly name for the account
+    - is_active: Active status (soft delete if False)
+
+    Note: bank_name and account_type cannot be changed (ignored if provided)
+
+    Path parameters:
+    - account_id: UUID of the account to update
+
+    Request body (all fields optional, at least one required):
+    - display_name: New display name
+    - is_active: New active status
+
+    Returns:
+    - 200 OK with updated account
+    - 404 Not Found if account doesn't exist or doesn't belong to user
+    - 422 Validation Error if no fields provided
+
+    Security:
+    - Only owner can update their accounts
+    """
+    account = account_service.update_account(
+        db = db,
+        account_id = account_id,
+        user_id = current_user.id,
+        display_name = update_data.display_name,
+        is_active = update_data.is_active
     )
 
     return account
