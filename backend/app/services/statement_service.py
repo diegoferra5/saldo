@@ -7,6 +7,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, List, Tuple, Dict, Any
 from uuid import UUID
+import logging
 
 from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session
@@ -23,6 +24,8 @@ from app.services.account_service import get_or_create_account
 from app.utils.pdf_parser import parse_bbva_debit_statement
 
 from app.services.transaction_service import create_transactions_from_parser_output
+
+logger = logging.getLogger(__name__)
 
 
 # -------------------------
@@ -70,6 +73,8 @@ def save_file_temporarily(file: UploadFile, user_id: UUID) -> tuple[str, int, by
 
     with open(file_path, "wb") as f:
         f.write(file_content)
+
+    logger.info(f"Statement file saved | user_id={user_id} | size_kb={file_size_kb}")
 
     return file_path, file_size_kb, file_content, safe_filename
 
@@ -126,9 +131,23 @@ def create_statement_record(
         db.add(new_statement)
         db.commit()
         db.refresh(new_statement)
+        logger.info(
+            f"Statement record created | "
+            f"statement_id={new_statement.id} | "
+            f"user_id={user_id} | "
+            f"bank={bank_name} | "
+            f"type={account_type}"
+        )
         return new_statement
     except IntegrityError:
         db.rollback()
+        logger.warning(
+            f"Duplicate statement rejected | "
+            f"user_id={user_id} | "
+            f"bank={bank_name} | "
+            f"type={account_type} | "
+            f"month={statement_month.strftime('%Y-%m')}"
+        )
         raise HTTPException(
             status_code=400,
             detail=f"Statement for {bank_name} ({account_type}) - {statement_month.strftime('%B %Y')} already exists",
@@ -175,10 +194,15 @@ def delete_statement(db: Session, statement_id: UUID, user_id: UUID) -> None:
         try:
             os.remove(file_path)
         except Exception as e:
-            print(f"Warning: Could not delete file {file_path}: {e}")
+            logger.warning(
+                f"Failed to delete statement file | "
+                f"statement_id={statement.id} | "
+                f"error={type(e).__name__}"
+            )
 
     db.delete(statement)
     db.commit()
+    logger.info(f"Statement deleted | statement_id={statement_id} | user_id={user_id}")
 
 
 # -------------------------
@@ -187,13 +211,26 @@ def delete_statement(db: Session, statement_id: UUID, user_id: UUID) -> None:
 
 def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
     """Parse a statement PDF, classify transactions, insert them, and update parsing status."""
+    start_time = datetime.utcnow()
+
+    logger.info(
+        f"Statement processing started | "
+        f"statement_id={statement_id} | "
+        f"user_id={user_id}"
+    )
+
     statement = get_statement_by_id(db, statement_id, user_id)
 
     pdf_path = f"/tmp/statements/{str(user_id)}/{statement.file_name}"
     if not os.path.exists(pdf_path):
         statement.parsing_status = "failed"
-        statement.error_message = f"PDF file not found at {pdf_path}"
+        statement.error_message = "PDF file not found on server"
         db.commit()
+        logger.error(
+            f"Statement processing failed - file not found | "
+            f"statement_id={statement_id} | "
+            f"user_id={user_id}"
+        )
         raise HTTPException(status_code=500, detail="Statement file missing on server")
 
     try:
@@ -251,6 +288,20 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         # Single commit for atomicity
         db.commit()
 
+        # Calculate duration
+        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+
+        logger.info(
+            f"Statement processing complete | "
+            f"statement_id={statement.id} | "
+            f"user_id={user_id} | "
+            f"tx_parsed={len(parsed)} | "
+            f"tx_inserted={len(created)} | "
+            f"duplicates={duplicates} | "
+            f"warnings_count={len(result.get('warnings', []))} | "
+            f"duration_ms={duration_ms}"
+        )
+
         return {
             "statement_id": str(statement.id),
             "status": "success",
@@ -262,6 +313,18 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
 
     except Exception as e:
         db.rollback()
+
+        # Calculate duration even on failure
+        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+
+        logger.error(
+            f"Statement processing failed | "
+            f"statement_id={statement_id} | "
+            f"user_id={user_id} | "
+            f"error={type(e).__name__} | "
+            f"duration_ms={duration_ms}",
+            exc_info=True  # Include full traceback
+        )
 
         # Mark failed (best effort)
         statement = (
@@ -373,6 +436,18 @@ def get_statement_health(
 
     # Determine if reconciled
     is_reconciled = abs(difference) < threshold
+
+    # Log reconciliation status
+    log_level = logger.info if is_reconciled else logger.warning
+    log_level(
+        f"Statement reconciliation check | "
+        f"statement_id={statement_id} | "
+        f"user_id={user_id} | "
+        f"is_reconciled={is_reconciled} | "
+        f"difference_abs={abs(difference)} | "
+        f"threshold={threshold} | "
+        f"unknown_count={unknown_count}"
+    )
 
     return {
         "statement_id": statement_id,
