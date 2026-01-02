@@ -74,7 +74,7 @@ def save_file_temporarily(file: UploadFile, user_id: UUID) -> tuple[str, int, by
     with open(file_path, "wb") as f:
         f.write(file_content)
 
-    logger.info(f"Statement file saved | user_id={user_id} | size_kb={file_size_kb}")
+    logger.info(f"Statement file saved | size_kb={file_size_kb}")
 
     return file_path, file_size_kb, file_content, safe_filename
 
@@ -188,21 +188,52 @@ def delete_statement(db: Session, statement_id: UUID, user_id: UUID) -> None:
     """Delete a statement row and its PDF file (best-effort)."""
     statement = get_statement_by_id(db, statement_id, user_id)
 
-    # Delete local file if it exists
-    file_path = f"/tmp/statements/{str(user_id)}/{statement.file_name}"
-    if os.path.exists(file_path):
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            logger.warning(
-                f"Failed to delete statement file | "
-                f"statement_id={statement.id} | "
-                f"error={type(e).__name__}"
-            )
+    # Delete local file using shared cleanup function
+    _cleanup_statement_file(user_id=user_id, file_name=statement.file_name, statement_id=statement_id)
 
     db.delete(statement)
     db.commit()
-    logger.info(f"Statement deleted | statement_id={statement_id} | user_id={user_id}")
+    logger.info(f"Statement deleted | statement_id={statement_id}")
+
+
+def _cleanup_statement_file(user_id: UUID, file_name: str, statement_id: UUID = None) -> None:
+    """
+    Best-effort cleanup of statement PDF file.
+
+    Called automatically after processing (success or failure) to remove PII from disk.
+    Does NOT raise exceptions - logs warnings only.
+
+    Args:
+        user_id: User UUID (for directory path)
+        file_name: Filename only (NOT full path, for security)
+        statement_id: Optional statement ID for safe logging (preferred over file_name)
+    """
+    file_path = f"/tmp/statements/{str(user_id)}/{file_name}"
+
+    # Use statement_id for logs if available (safer than file_name which may contain PII)
+    log_identifier = f"statement_id={statement_id}" if statement_id else f"file=*.pdf"
+
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"Statement file cleaned up | {log_identifier}")
+        else:
+            # File already deleted or never existed - not an error, just log at INFO level
+            logger.info(f"Statement file already removed | {log_identifier}")
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        # Best-effort: log but don't crash
+        logger.warning(
+            f"Failed to cleanup statement file | "
+            f"{log_identifier} | "
+            f"error={type(e).__name__}"
+        )
+    except Exception as e:
+        # Catch any unexpected errors
+        logger.warning(
+            f"Unexpected error during file cleanup | "
+            f"{log_identifier} | "
+            f"error={type(e).__name__}"
+        )
 
 
 # -------------------------
@@ -210,16 +241,38 @@ def delete_statement(db: Session, statement_id: UUID, user_id: UUID) -> None:
 # -------------------------
 
 def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
-    """Parse a statement PDF, classify transactions, insert them, and update parsing status."""
+    """
+    Parse a statement PDF, classify transactions, insert them, and update parsing status.
+
+    Automatically cleans up the PDF file after processing (success or failure) to remove PII.
+
+    Args:
+        db: Database session
+        statement_id: Statement UUID to process
+        user_id: User UUID (for security check)
+
+    Returns:
+        Dict with processing results (transactions_parsed, transactions_inserted, etc.)
+
+    Raises:
+        HTTPException: If processing fails
+    """
     start_time = datetime.utcnow()
 
-    logger.info(
-        f"Statement processing started | "
-        f"statement_id={statement_id} | "
-        f"user_id={user_id}"
-    )
+    # Log start - include user_id only in DEBUG mode for privacy
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.info(
+            f"Statement processing started | "
+            f"statement_id={statement_id} | "
+            f"user_id={user_id}"
+        )
+    else:
+        logger.info(f"Statement processing started | statement_id={statement_id}")
 
     statement = get_statement_by_id(db, statement_id, user_id)
+
+    # Store filename early for cleanup in finally block (even if processing fails)
+    file_name_for_cleanup = statement.file_name
 
     pdf_path = f"/tmp/statements/{str(user_id)}/{statement.file_name}"
     if not os.path.exists(pdf_path):
@@ -229,7 +282,6 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         logger.error(
             f"Statement processing failed - file not found | "
             f"statement_id={statement_id} | "
-            f"user_id={user_id}"
         )
         raise HTTPException(status_code=500, detail="Statement file missing on server")
 
@@ -291,16 +343,28 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         # Calculate duration
         duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
-        logger.info(
-            f"Statement processing complete | "
-            f"statement_id={statement.id} | "
-            f"user_id={user_id} | "
-            f"tx_parsed={len(parsed)} | "
-            f"tx_inserted={len(created)} | "
-            f"duplicates={duplicates} | "
-            f"warnings_count={len(result.get('warnings', []))} | "
-            f"duration_ms={duration_ms}"
-        )
+        # Log success - user_id only in DEBUG for privacy
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.info(
+                f"Statement processing complete | "
+                f"statement_id={statement.id} | "
+                f"user_id={user_id} | "
+                f"tx_parsed={len(parsed)} | "
+                f"tx_inserted={len(created)} | "
+                f"duplicates={duplicates} | "
+                f"warnings_count={len(result.get('warnings', []))} | "
+                f"duration_ms={duration_ms}"
+            )
+        else:
+            logger.info(
+                f"Statement processing complete | "
+                f"statement_id={statement.id} | "
+                f"tx_parsed={len(parsed)} | "
+                f"tx_inserted={len(created)} | "
+                f"duplicates={duplicates} | "
+                f"warnings_count={len(result.get('warnings', []))} | "
+                f"duration_ms={duration_ms}"
+            )
 
         return {
             "statement_id": str(statement.id),
@@ -317,14 +381,30 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         # Calculate duration even on failure
         duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
-        logger.error(
-            f"Statement processing failed | "
-            f"statement_id={statement_id} | "
-            f"user_id={user_id} | "
-            f"error={type(e).__name__} | "
-            f"duration_ms={duration_ms}",
-            exc_info=True  # Include full traceback
-        )
+        # Log error - level determines PII exposure
+        # DEBUG: full details (str(e) + traceback) - only for local development
+        # INFO/WARNING/ERROR: only error type - safe for production logs
+        is_debug = logger.isEnabledFor(logging.DEBUG)
+
+        if is_debug:
+            # Development: include str(e), traceback, and user_id for debugging
+            logger.error(
+                f"Statement processing failed | "
+                f"statement_id={statement_id} | "
+                f"user_id={user_id} | "
+                f"error={type(e).__name__} | "
+                f"duration_ms={duration_ms} | "
+                f"message={str(e)}",  # Only in DEBUG mode
+                exc_info=True  # Include full traceback in DEBUG
+            )
+        else:
+            # Production: NO str(e), NO traceback, NO user_id (privacy-first)
+            logger.error(
+                f"Statement processing failed | "
+                f"statement_id={statement_id} | "
+                f"error={type(e).__name__} | "
+                f"duration_ms={duration_ms}"
+            )
 
         # Mark failed (best effort)
         statement = (
@@ -334,10 +414,20 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         )
         if statement:
             statement.parsing_status = "failed"
-            statement.error_message = str(e)
+            # Store only error type (safe), NOT str(e) which may contain PII
+            statement.error_message = f"Processing failed: {type(e).__name__}"
             db.commit()
 
-        raise HTTPException(status_code=500, detail=f"Failed to process statement: {str(e)}")
+        # Return generic error to client (no PII leakage)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to process statement. Please check the file and try again."
+        )
+
+    finally:
+        # Always cleanup PDF file (success or failure) to remove PII from disk
+        # Use pre-stored filename (safe even if statement becomes None or errors occur)
+        _cleanup_statement_file(user_id=user_id, file_name=file_name_for_cleanup, statement_id=statement_id)
 
 
 # -------------------------
@@ -437,17 +527,28 @@ def get_statement_health(
     # Determine if reconciled
     is_reconciled = abs(difference) < threshold
 
-    # Log reconciliation status
+    # Log reconciliation status - user_id only in DEBUG for privacy
     log_level = logger.info if is_reconciled else logger.warning
-    log_level(
-        f"Statement reconciliation check | "
-        f"statement_id={statement_id} | "
-        f"user_id={user_id} | "
-        f"is_reconciled={is_reconciled} | "
-        f"difference_abs={abs(difference)} | "
-        f"threshold={threshold} | "
-        f"unknown_count={unknown_count}"
-    )
+
+    if logger.isEnabledFor(logging.DEBUG):
+        log_level(
+            f"Statement reconciliation check | "
+            f"statement_id={statement_id} | "
+            f"user_id={user_id} | "
+            f"is_reconciled={is_reconciled} | "
+            f"difference_abs={abs(difference)} | "
+            f"threshold={threshold} | "
+            f"unknown_count={unknown_count}"
+        )
+    else:
+        log_level(
+            f"Statement reconciliation check | "
+            f"statement_id={statement_id} | "
+            f"is_reconciled={is_reconciled} | "
+            f"difference_abs={abs(difference)} | "
+            f"threshold={threshold} | "
+            f"unknown_count={unknown_count}"
+        )
 
     return {
         "statement_id": statement_id,
