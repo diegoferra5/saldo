@@ -61,3 +61,12 @@ htmlcov/
 # Test files (temporary)
 test_config.py
 test_*.py
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.env*
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
