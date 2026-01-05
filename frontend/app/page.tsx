@@ -1,14 +1,23 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 
 export default function Home() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <main className="text-center space-y-8 px-4">
-        <div className="space-y-4">
-          <h1 className="text-5xl font-bold tracking-tight">
-            Saldo 💰
-          </h1>
+        <div className="space-y-6">
+          {/* Wordmark grande */}
+          <div className="flex justify-center">
+            <Image
+              src="/saldo-wordmark.svg"
+              alt="Saldo"
+              width={280}
+              height={80}
+              priority
+              className="h-20 w-auto"
+            />
+          </div>
           <p className="text-xl text-muted-foreground max-w-md mx-auto">
             Decide mejor con tu dinero
           </p>

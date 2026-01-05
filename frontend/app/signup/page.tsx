@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -128,6 +130,28 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <div className="w-full max-w-md p-8">
+        {/* Botón volver */}
+        <div className="mb-6">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/">
+              ← Volver a inicio
+            </Link>
+          </Button>
+        </div>
+
+        {/* Logo pequeño */}
+        <div className="mb-6 flex justify-center">
+          <Link href="/">
+            <Image
+              src="/saldo-wordmark.svg"
+              alt="Saldo"
+              width={140}
+              height={40}
+              className="h-10 w-auto"
+            />
+          </Link>
+        </div>
+
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold">Crear cuenta</h1>
           <p className="mt-2 text-muted-foreground">
