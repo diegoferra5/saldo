@@ -7,17 +7,30 @@ export default function Home() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <main className="text-center space-y-8 px-4">
         <div className="space-y-6">
-          {/* Wordmark grande */}
+          {/* Logo ícono grande */}
+          <div className="flex justify-center">
+            <Image
+              src="/saldo-icon-light.svg"
+              alt="Saldo"
+              width={120}
+              height={120}
+              priority
+              className="h-28 w-28"
+            />
+          </div>
+
+          {/* Wordmark mediano */}
           <div className="flex justify-center">
             <Image
               src="/saldo-wordmark.svg"
               alt="Saldo"
-              width={280}
-              height={80}
+              width={200}
+              height={60}
               priority
-              className="h-20 w-auto"
+              className="h-14 w-auto"
             />
           </div>
+
           <p className="text-xl text-muted-foreground max-w-md mx-auto">
             Decide mejor con tu dinero
           </p>
