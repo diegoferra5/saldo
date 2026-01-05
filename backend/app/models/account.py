@@ -1,7 +1,7 @@
 # app/models/account.py
 
 import uuid
-from sqlalchemy import Column, String, Boolean, ForeignKey, text
+from sqlalchemy import Column, String, Boolean, ForeignKey, Numeric, Date, text
 from sqlalchemy.dialects.postgresql import UUID, TIMESTAMP
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -46,6 +46,55 @@ class Account(Base):
         nullable=False,
         default=True,
         server_default=text("true"),
+    )
+
+    # ========================================
+    # Balance tracking (common for all account types)
+    # ========================================
+    balance = Column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Current balance. DEBIT: positive=funds available, negative=overdraft. "
+                "CREDIT: negative=amount owed, zero=paid off",
+    )
+    balance_updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+        comment="Timestamp when balance was last updated from a statement",
+    )
+    last_statement_date = Column(
+        Date,
+        nullable=True,
+        comment="statement_month of the most recent processed statement that updated this balance",
+    )
+
+    # ========================================
+    # Credit-specific fields (nullable for DEBIT accounts)
+    # ========================================
+    credit_limit = Column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Credit limit (CREDIT accounts only, NULL for DEBIT)",
+    )
+    minimum_payment = Column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Minimum payment due this period (CREDIT accounts only, NULL for DEBIT)",
+    )
+    payment_min_no_interest = Column(
+        Numeric(15, 2),
+        nullable=True,
+        comment="Minimum payment amount required to avoid interest charges (CREDIT accounts only, NULL for DEBIT)",
+    )
+    payment_date = Column(
+        Date,
+        nullable=True,
+        comment="Suggested/recommended payment date (CREDIT accounts only, NULL for DEBIT)",
+    )
+    payment_due_date = Column(
+        Date,
+        nullable=True,
+        comment="Final payment due date / deadline - late fees apply after this date (CREDIT accounts only, NULL for DEBIT)",
     )
 
     # Timestamps

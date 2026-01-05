@@ -1,8 +1,9 @@
-from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator, ConfigDict, model_validator, computed_field
+from datetime import datetime, date
 from typing import Optional
 from enum import Enum
 from uuid import UUID
+from decimal import Decimal
 
 
 class AccountType(str, Enum):
@@ -44,6 +45,56 @@ class AccountResponse(AccountBase):
     created_at: datetime
     updated_at: datetime
 
+    # Balance tracking (common for all account types)
+    balance: Optional[Decimal] = Field(
+        default=None,
+        description="Current balance. DEBIT: positive=funds available, negative=overdraft. "
+                    "CREDIT: negative=amount owed, zero=paid off"
+    )
+    balance_updated_at: Optional[datetime] = Field(
+        default=None,
+        description="Timestamp when balance was last updated from a statement"
+    )
+    last_statement_date: Optional[date] = Field(
+        default=None,
+        description="statement_month of the most recent processed statement that updated this balance"
+    )
+
+    # Credit-specific fields (nullable for DEBIT accounts)
+    credit_limit: Optional[Decimal] = Field(
+        default=None,
+        description="Credit limit (CREDIT accounts only)"
+    )
+    minimum_payment: Optional[Decimal] = Field(
+        default=None,
+        description="Minimum payment due this period (CREDIT accounts only)"
+    )
+    payment_min_no_interest: Optional[Decimal] = Field(
+        default=None,
+        description="Minimum payment amount required to avoid interest charges (CREDIT accounts only)"
+    )
+    payment_date: Optional[date] = Field(
+        default=None,
+        description="Suggested/recommended payment date (CREDIT accounts only)"
+    )
+    payment_due_date: Optional[date] = Field(
+        default=None,
+        description="Final payment due date / deadline - late fees apply after this date (CREDIT accounts only)"
+    )
+
+    # Computed field: available_credit (only for CREDIT accounts)
+    @computed_field
+    @property
+    def available_credit(self) -> Optional[Decimal]:
+        """
+        Calculate available credit for CREDIT accounts.
+        Formula: credit_limit + balance (balance is negative for CREDIT)
+        Returns None for DEBIT accounts or if credit_limit/balance is missing.
+        """
+        if self.account_type == AccountType.CREDIT and self.credit_limit is not None and self.balance is not None:
+            return self.credit_limit + self.balance  # balance is negative, so this is actually credit_limit - abs(balance)
+        return None
+
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
 
@@ -75,6 +126,22 @@ class AccountUpdate(BaseModel):
 class AccountList(AccountBase):
     id: UUID
     is_active: bool
+    balance: Optional[Decimal] = None
+    balance_updated_at: Optional[datetime] = None
+    last_statement_date: Optional[date] = None
+
+    # Credit-specific fields (for listing credit accounts)
+    credit_limit: Optional[Decimal] = None
+    payment_due_date: Optional[date] = None
+
+    # Computed field: available_credit (only for CREDIT accounts)
+    @computed_field
+    @property
+    def available_credit(self) -> Optional[Decimal]:
+        """Calculate available credit for CREDIT accounts."""
+        if self.account_type == AccountType.CREDIT and self.credit_limit is not None and self.balance is not None:
+            return self.credit_limit + self.balance
+        return None
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
