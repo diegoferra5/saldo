@@ -323,6 +323,59 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         statement.summary_data = summary
         db.flush()
 
+        # ========================================
+        # Update Account balance (from most recent statement only)
+        # ========================================
+
+        # Extract final_balance from summary
+        raw_final_balance = summary.get("final_balance")
+
+        if raw_final_balance is None:
+            raise ValueError("final balance missing from statement summary")
+        
+        final_balance = Decimal(str(raw_final_balance))
+
+        # Determine if this statement is the most recent for this account
+        # (important if user uploads statements out of chronological order)
+        is_most_recent = True
+        if account.last_statement_date:
+            is_most_recent = statement.statement_month > account.last_statement_date
+
+        # Only update balance if this is the most recent statement
+        if is_most_recent:
+            # Update balance (common for all account types)
+            account.balance = final_balance
+            account.balance_updated_at = datetime.utcnow()
+            account.last_statement_date = statement.statement_month
+
+            # Handle CREDIT-specific fields (future: will be populated by CREDIT parsers)
+            if statement.account_type.upper() == "CREDIT":
+                # Future: extract these from summary when CREDIT parser is implemented
+                # For now, these remain NULL for DEBIT accounts
+                account.minimum_payment = summary.get("minimum_payment") and Decimal(str(summary.get("minimum_payment")))
+                account.payment_min_no_interest = summary.get("payment_min_no_interest") and Decimal(str(summary.get("payment_min_no_interest")))
+                account.payment_date = summary.get("payment_date")  # Assumes date object
+                account.payment_due_date = summary.get("payment_due_date")  # Assumes date object
+                account.credit_limit = summary.get("credit_limit") and Decimal(str(summary.get("credit_limit")))
+            else:
+                # DEBIT account: clear credit-specific fields (in case account type changed)
+                # Explicitly clear credit fields for DEBIT accounts to avoid stale data if account_type ever changes
+
+                account.credit_limit = None
+                account.minimum_payment = None
+                account.payment_min_no_interest = None
+                account.payment_date = None
+                account.payment_due_date = None
+
+            db.flush()
+
+            logger.info(
+                f"Account balance updated | "
+                f"account_id={account.id} | "
+                f"balance={final_balance} | "
+                f"statement_month={statement.statement_month}"
+            )
+
         # Insert transactions in batch (savepoints + flush, no commit inside)
         created, duplicates = create_transactions_from_parser_output(
             parser_transactions=parsed,
