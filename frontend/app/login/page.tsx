@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,28 +19,20 @@ const getErrorMessage = (data: any, status: number): string => {
   if (Array.isArray(detail) && detail[0]?.msg) return detail[0].msg;
 
   // Fallback genérico
-  return data?.message || `Error (${status}) al crear la cuenta`;
+  return data?.message || `Error (${status}) al iniciar sesión`;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export default function SignupPage() {
+export default function LoginPage() {
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
 
   // Validar si el botón debe estar deshabilitado
-  const isDisabled =
-    isLoading ||
-    !email ||
-    password.length < 8 ||
-    confirmPassword.length < 8 ||
-    password !== confirmPassword;
+  const isDisabled = isLoading || !email || password.length < 8;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,16 +50,11 @@ export default function SignupPage() {
       return;
     }
 
-    if (password !== confirmPassword) {
-      setError("Las contraseñas no coinciden");
-      return;
-    }
-
     // Llamada al backend
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/api/auth/register`, {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -74,11 +62,10 @@ export default function SignupPage() {
         body: JSON.stringify({
           email,
           password,
-          full_name: fullName || undefined, // Solo envía si hay valor
         }),
       });
 
-      // Parse seguro del JSON (puede fallar si el backend responde HTML o vacío)
+      // Parse seguro del JSON
       let data: any = null;
       try {
         data = await response.json();
@@ -87,15 +74,22 @@ export default function SignupPage() {
       }
 
       if (!response.ok) {
-        // Error del backend (400, 500, etc.)
+        // Error del backend (401, 400, 500, etc.)
         const errorMsg = getErrorMessage(data, response.status);
         setError(errorMsg);
         return;
       }
 
-      // Registro exitoso (status 201)
-      setSuccess(true);
-      console.log("Usuario registrado:", data);
+      // Login exitoso (status 200)
+      console.log("Login exitoso:", data);
+
+      // Guardar token en localStorage
+      if (data.access_token) {
+        localStorage.setItem("auth-token", data.access_token);
+      }
+
+      // Redirigir a la página principal (después haremos dashboard)
+      router.push("/");
     } catch (err) {
       // Error de red o servidor no disponible
       setError("No se pudo conectar con el servidor. Verifica que el backend esté corriendo.");
@@ -105,59 +99,25 @@ export default function SignupPage() {
     }
   };
 
-  if (success) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-center">¡Cuenta creada!</CardTitle>
-            <CardDescription className="text-center">
-              Tu cuenta ha sido creada exitosamente
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <Button onClick={() => router.push("/")}>
-              Ir a inicio
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
       <div className="w-full max-w-md p-8">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold">Crear cuenta</h1>
+          <h1 className="text-3xl font-bold">Iniciar sesión</h1>
           <p className="mt-2 text-muted-foreground">
-            Decide mejor con tu dinero
+            Accede a tu cuenta de Saldo
           </p>
         </div>
 
         <Card>
           <CardHeader>
-            <CardTitle>Registro</CardTitle>
+            <CardTitle>Bienvenido de nuevo</CardTitle>
             <CardDescription>
-              Ingresa tus datos para crear una cuenta
+              Ingresa tus credenciales para continuar
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Full Name */}
-              <div className="space-y-2">
-                <Label htmlFor="fullName">¿Cómo te debemos llamar?</Label>
-                <Input
-                  id="fullName"
-                  type="text"
-                  placeholder="Tu nombre"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  disabled={isLoading}
-                />
-                <p className="text-xs text-muted-foreground">Opcional</p>
-              </div>
-
               {/* Email */}
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
@@ -178,23 +138,9 @@ export default function SignupPage() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Mínimo 8 caracteres"
+                  placeholder="Tu contraseña"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  required
-                  disabled={isLoading}
-                />
-              </div>
-
-              {/* Confirm Password */}
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirmar contraseña</Label>
-                <Input
-                  id="confirmPassword"
-                  type="password"
-                  placeholder="Repite tu contraseña"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
                   required
                   disabled={isLoading}
                 />
@@ -209,8 +155,16 @@ export default function SignupPage() {
 
               {/* Submit button */}
               <Button type="submit" className="w-full" disabled={isDisabled}>
-                {isLoading ? "Creando cuenta..." : "Crear cuenta"}
+                {isLoading ? "Iniciando sesión..." : "Iniciar sesión"}
               </Button>
+
+              {/* Link to signup */}
+              <div className="text-center text-sm text-muted-foreground">
+                ¿No tienes cuenta?{" "}
+                <Link href="/signup" className="font-medium text-foreground hover:underline">
+                  Crear cuenta
+                </Link>
+              </div>
             </form>
           </CardContent>
         </Card>
