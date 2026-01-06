@@ -11,6 +11,7 @@ from sqlalchemy import text
 
 from app.core.database import SessionLocal
 from app.core.logging_config import setup_logging
+from app.core.config import settings
 
 from app.routes import auth
 from app.routes import statements
@@ -35,7 +36,7 @@ logger.info("FastAPI application initialized")
 # Configure CORS (allows frontend to call API)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production: ["https://saldo.mx"]
+    allow_origins=settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS != "*" else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
