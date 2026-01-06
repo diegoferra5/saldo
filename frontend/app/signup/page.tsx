@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { setToken } from "@/lib/auth";
 
 // Helper para extraer mensajes de error de FastAPI
 const getErrorMessage = (data: any, status: number): string => {
@@ -37,7 +38,7 @@ export default function SignupPage() {
   // Validar si el botón debe estar deshabilitado
   const isDisabled =
     isLoading ||
-    !email ||
+    !email.trim() ||
     password.length < 8 ||
     confirmPassword.length < 8 ||
     password !== confirmPassword;
@@ -103,7 +104,7 @@ export default function SignupPage() {
       // Validar y guardar token
       const token = data?.access_token;
       if (typeof token === "string" && token.length > 0) {
-        localStorage.setItem("auth-token", token);
+        setToken(token);
         // Redirigir a la página principal (después haremos dashboard)
         router.push("/");
       } else {
