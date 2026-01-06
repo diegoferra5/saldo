@@ -19,10 +19,7 @@ from app.models.account import Account
 from app.models.transaction import Transaction
 
 from app.services.account_service import get_or_create_account
-
-
-from app.utils.pdf_parser import parse_bbva_debit_statement
-
+from app.utils.pdf_parser import get_parser_for_statement
 from app.services.transaction_service import create_transactions_from_parser_output
 
 logger = logging.getLogger(__name__)
@@ -291,16 +288,18 @@ def process_statement(db: Session, statement_id: UUID, user_id: UUID) -> dict:
         statement.error_message = None
         db.flush()  # keep everything in one DB transaction
 
-        # Validate parser availability (MVP: only BBVA DEBIT supported)
-        if statement.bank_name.upper() != "BBVA" or statement.account_type.upper() != "DEBIT":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Parser not yet implemented for {statement.bank_name} {statement.account_type}. "
-                       f"Currently supported: BBVA DEBIT only."
+        # Get the appropriate parser for this bank and account type
+        try:
+            parser_function = get_parser_for_statement(
+                statement.bank_name,
+                statement.account_type
             )
+        except ValueError as e:
+            # Parser not available for this bank/type combination
+            raise HTTPException(status_code=400, detail=str(e))
 
-        # Parse PDF using orchestrated parser function
-        result = parse_bbva_debit_statement(pdf_path, debug=False)
+        # Parse PDF using the selected parser
+        result = parser_function(pdf_path, debug=False)
 
         parsed = result["transactions"]
         summary = result["summary"]

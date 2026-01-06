@@ -1,6 +1,6 @@
 import pdfplumber
 import re
-from typing import Dict, List, Optional, TypedDict
+from typing import Dict, List, Optional, TypedDict, Callable, Tuple
 
 # Compile patterns once (performance + clarity)
 DATE_RE = re.compile(r'^\d{2}/[A-Z]{3}$')
@@ -1124,6 +1124,104 @@ def parse_bbva_debit_statement(pdf_path: str, debug: bool = False) -> ParserResu
         "warnings": warnings,
         "summary": summary
     }
+
+
+# ========================================
+# PARSER REGISTRY - Multi-bank/multi-type support
+# ========================================
+
+# Type alias for parser functions
+ParserFunction = Callable[[str, bool], ParserResult]
+
+# Registry: maps (bank_name, account_type) → parser function
+# Add new parsers here as they're implemented
+PARSER_REGISTRY: Dict[Tuple[str, str], ParserFunction] = {
+    ("BBVA", "DEBIT"): parse_bbva_debit_statement,
+    # Future parsers:
+    # ("BBVA", "CREDIT"): parse_bbva_credit_statement,
+    # ("SANTANDER", "DEBIT"): parse_santander_debit_statement,
+    # ("BANORTE", "CREDIT"): parse_banorte_credit_statement,
+}
+
+
+def get_parser_for_statement(bank_name: str, account_type: str) -> ParserFunction:
+    """
+    Get the appropriate parser function for a given bank and account type.
+
+    This function looks up the parser in the PARSER_REGISTRY based on the
+    bank name and account type. It normalizes inputs (uppercase, strip whitespace)
+    to ensure consistent lookups.
+
+    Args:
+        bank_name: Name of the bank (e.g., "BBVA", "Santander")
+        account_type: Type of account (e.g., "DEBIT", "CREDIT")
+
+    Returns:
+        Parser function that takes (pdf_path: str, debug: bool) and returns ParserResult
+
+    Raises:
+        ValueError: If no parser is available for the given bank + account type combination
+
+    Example:
+        >>> parser = get_parser_for_statement("BBVA", "DEBIT")
+        >>> result = parser("/path/to/statement.pdf", debug=False)
+        >>> print(f"Found {len(result['transactions'])} transactions")
+
+    Usage in services:
+        try:
+            parser = get_parser_for_statement(statement.bank_name, statement.account_type)
+            result = parser(pdf_path, debug=False)
+        except ValueError as e:
+            # Handle unsupported bank/type
+            raise HTTPException(status_code=400, detail=str(e))
+    """
+    # Normalize inputs to uppercase and strip whitespace
+    key = (bank_name.upper().strip(), account_type.upper().strip())
+
+    # Look up parser in registry
+    parser = PARSER_REGISTRY.get(key)
+
+    if not parser:
+        # Generate helpful error message with list of supported combinations
+        supported = ", ".join([f"{bank} {acc_type}" for bank, acc_type in PARSER_REGISTRY.keys()])
+        raise ValueError(
+            f"Parser not implemented for {bank_name} {account_type}. "
+            f"Currently supported: {supported}"
+        )
+
+    return parser
+
+
+def get_supported_banks() -> List[str]:
+    """
+    Get a list of all banks that have at least one parser implemented.
+
+    Returns:
+        List of unique bank names (uppercase)
+
+    Example:
+        >>> banks = get_supported_banks()
+        >>> print(banks)  # ['BBVA']
+    """
+    return sorted(list(set(bank for bank, _ in PARSER_REGISTRY.keys())))
+
+
+def get_supported_account_types(bank_name: str) -> List[str]:
+    """
+    Get a list of account types supported for a specific bank.
+
+    Args:
+        bank_name: Name of the bank (case-insensitive)
+
+    Returns:
+        List of account types supported for this bank (e.g., ['DEBIT', 'CREDIT'])
+
+    Example:
+        >>> types = get_supported_account_types("BBVA")
+        >>> print(types)  # ['DEBIT']
+    """
+    bank_upper = bank_name.upper().strip()
+    return sorted([acc_type for bank, acc_type in PARSER_REGISTRY.keys() if bank == bank_upper])
 
 
 if __name__ == "__main__":
