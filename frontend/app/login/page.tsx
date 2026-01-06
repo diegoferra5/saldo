@@ -39,9 +39,12 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
 
+    // Normalizar email
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Validación básica en cliente
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
       setError("Email inválido");
       return;
     }
@@ -61,7 +64,7 @@ export default function LoginPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email,
+          email: normalizedEmail,
           password,
         }),
       });
@@ -84,13 +87,17 @@ export default function LoginPage() {
       // Login exitoso (status 200)
       console.log("Login exitoso:", data);
 
-      // Guardar token en localStorage
-      if (data.access_token) {
-        localStorage.setItem("auth-token", data.access_token);
+      // Validar y guardar token
+      const token = data?.access_token;
+      if (typeof token === "string" && token.length > 0) {
+        localStorage.setItem("auth-token", token);
+        // Redirigir a la página principal (después haremos dashboard)
+        router.push("/");
+      } else {
+        // Token no válido
+        console.error("Token no recibido del backend");
+        setError("Error al iniciar sesión. Intenta de nuevo.");
       }
-
-      // Redirigir a la página principal (después haremos dashboard)
-      router.push("/");
     } catch (err) {
       // Error de red o servidor no disponible
       setError("No se pudo conectar con el servidor. Verifica que el backend esté corriendo.");
