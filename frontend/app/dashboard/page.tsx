@@ -10,6 +10,7 @@ interface User {
   id: string;
   email: string;
   full_name: string | null;
+  net_worth: number;
 }
 
 export default function DashboardPage() {
@@ -114,9 +115,17 @@ export default function DashboardPage() {
       <div className="p-8">
         <h1 className="text-3xl font-bold">Dashboard</h1>
         {user && (
-          <p className="mt-4 text-muted-foreground">
-            Bienvenido, {user.full_name || user.email}
-          </p>
+          <>
+            <p className="mt-4 text-muted-foreground">
+              Bienvenido, {user.full_name || user.email}
+            </p>
+            <div className="mt-8">
+              <p className="text-sm text-muted-foreground">Patrimonio neto</p>
+              <p className="text-4xl font-bold">
+                ${user.net_worth.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+          </>
         )}
       </div>
     </div>

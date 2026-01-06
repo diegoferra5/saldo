@@ -55,10 +55,30 @@ class User(Base):
     )
 
     transactions = relationship(
-        "Transaction", 
-        back_populates="user", 
+        "Transaction",
+        back_populates="user",
         passive_deletes=True)
 
-    
+    @property
+    def net_worth(self) -> float:
+        """
+        Calculate the user's total net worth.
+
+        Net worth is the sum of all account balances:
+        - DEBIT accounts have positive balances (assets)
+        - CREDIT accounts have negative balances (liabilities)
+        - Only active accounts are included
+        - Accounts with NULL balance are treated as 0
+
+        Returns:
+            float: Total net worth
+        """
+        total = sum(
+            float(account.balance or 0)
+            for account in self.accounts
+            if account.is_active
+        )
+        return total
+
     def __repr__(self) -> str:
         return f"<User(email={self.email})>"

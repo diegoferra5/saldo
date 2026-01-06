@@ -35,6 +35,7 @@ class UserResponse(UserBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+    net_worth: float
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")
 
