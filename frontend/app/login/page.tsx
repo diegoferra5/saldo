@@ -92,8 +92,8 @@ export default function LoginPage() {
       const token = data?.access_token;
       if (typeof token === "string" && token.length > 0) {
         setToken(token);
-        // Redirigir a la página principal (después haremos dashboard)
-        router.push("/");
+        // Redirigir a dashboard
+        router.push("/dashboard");
       } else {
         // Token no válido
         console.error("Token no recibido del backend");
@@ -156,6 +156,7 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   placeholder="tu@email.com"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -170,6 +171,7 @@ export default function LoginPage() {
                   id="password"
                   type="password"
                   placeholder="Tu contraseña"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required

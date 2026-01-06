@@ -105,8 +105,8 @@ export default function SignupPage() {
       const token = data?.access_token;
       if (typeof token === "string" && token.length > 0) {
         setToken(token);
-        // Redirigir a la página principal (después haremos dashboard)
-        router.push("/");
+        // Redirigir a dashboard
+        router.push("/dashboard");
       } else {
         // Token no válido, redirigir a login
         console.warn("Token no recibido del backend, redirigiendo a login");
@@ -184,6 +184,7 @@ export default function SignupPage() {
                   id="email"
                   type="email"
                   placeholder="tu@email.com"
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -198,6 +199,7 @@ export default function SignupPage() {
                   id="password"
                   type="password"
                   placeholder="Mínimo 8 caracteres"
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -212,6 +214,7 @@ export default function SignupPage() {
                   id="confirmPassword"
                   type="password"
                   placeholder="Repite tu contraseña"
+                  autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
