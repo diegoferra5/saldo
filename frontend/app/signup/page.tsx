@@ -33,7 +33,6 @@ export default function SignupPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
 
   // Validar si el botón debe estar deshabilitado
   const isDisabled =
@@ -47,9 +46,12 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
 
+    // Normalizar email
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Validación básica en cliente
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(normalizedEmail)) {
       setError("Email inválido");
       return;
     }
@@ -74,7 +76,7 @@ export default function SignupPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          email,
+          email: normalizedEmail,
           password,
           full_name: fullName || undefined, // Solo envía si hay valor
         }),
@@ -96,8 +98,20 @@ export default function SignupPage() {
       }
 
       // Registro exitoso (status 201)
-      setSuccess(true);
       console.log("Usuario registrado:", data);
+
+      // Validar y guardar token
+      const token = data?.access_token;
+      if (typeof token === "string" && token.length > 0) {
+        localStorage.setItem("auth-token", token);
+        // Redirigir a la página principal (después haremos dashboard)
+        router.push("/");
+      } else {
+        // Token no válido, redirigir a login
+        console.warn("Token no recibido del backend, redirigiendo a login");
+        setError("Cuenta creada. Por favor inicia sesión.");
+        setTimeout(() => router.push("/login"), 2000);
+      }
     } catch (err) {
       // Error de red o servidor no disponible
       setError("No se pudo conectar con el servidor. Verifica que el backend esté corriendo.");
@@ -106,26 +120,6 @@ export default function SignupPage() {
       setIsLoading(false);
     }
   };
-
-  if (success) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle className="text-center">¡Cuenta creada!</CardTitle>
-            <CardDescription className="text-center">
-              Tu cuenta ha sido creada exitosamente
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-center">
-            <Button onClick={() => router.push("/")}>
-              Ir a inicio
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
